@@ -1,0 +1,16 @@
+fn fib(n) {
+  var a = 1;
+  var b = 1;
+  var tmp = 0;
+  var index = 0;
+
+  while index < n {
+    tmp = (a + b);
+    a = b;
+    b = tmp;
+    index = (index + 1);
+  }
+
+  return b;
+}
+
