@@ -1,5 +1,5 @@
 use crate::token_reader::TokenReader;
-use crate::token::{TokenType, OperatorType, Location};
+use crate::token::{TokenType, OperatorType, Location, Keyword};
 use crate::error::CompilerResult;
 use crate::ast::*;
 use std::mem::take;
@@ -18,8 +18,8 @@ impl<'a> Parser<'a> {
 
         while self.reader.has_tokens() {
             let token = self.reader.next()?;
-            if let TokenType::Identifier(idenfitier) = &token.token_type {
-                if idenfitier == "fn" {
+            if let TokenType::Keyword(kw) = &token.token_type {
+                if *kw == Keyword::Fn {
                     let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function()?);
                     result.body.push(func);
                 }
@@ -81,22 +81,22 @@ impl<'a> Parser<'a> {
     fn parse_statement(&mut self) -> CompilerResult<Box<dyn StatementNode<'a, 'a> + 'a>> {
         let token = self.reader.next()?;
         let location = token.location;
-        if let TokenType::Identifier(identifier) = &token.token_type {
-            match identifier.as_ref() {
-                "return" => {
+        if let TokenType::Keyword(kw) = &token.token_type {
+            match kw {
+                Keyword::Return => {
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
                     return Ok(Box::new(ReturnNode::<'a, 'a>{location, expression}));
                 },
-                "var" => {
+                Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
                     self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
                     return Ok(Box::new(VarDeclNode::<'a, 'a>{location, name, expression}));
                 },
-                "if" => {
+                Keyword::If => {
                     return Ok(Box::new(self.parse_if_statement(location)?));
                 },
-                "while" => {
+                Keyword::While => {
                     return Ok(Box::new(self.parse_while_statement(location)?));
                 },
                 _ => {},
@@ -148,6 +148,9 @@ impl<'a> Parser<'a> {
                 },
                 TokenType::Identifier(value) => {
                     expr_stack.push(Some(Box::new(IdentifierNode{location: token.location, name: value.to_string()})));
+                },
+                TokenType::Keyword(kw) => {
+                    compiler_err!(token.location, "unexpected keyword {:?}", kw)
                 },
             }
         }

@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::mem::take;
-use crate::token::{Location, Token, TokenType, read_operator_type};
+use crate::token::{Location, OperatorType, Token, TokenType, Keyword};
 
 fn is_wide_space(ch: char) -> bool {
     match ch {
@@ -16,6 +16,7 @@ pub struct Lexer {
     reader: Box<dyn Read>,
     out_tokens: Vec<Token>,
     current_token: String,
+    token_start: Location,
     current_location: Location,
 }
 
@@ -25,12 +26,14 @@ impl Lexer {
             reader,
             out_tokens: Vec::new(),
             current_token: String::new(),
+            token_start: Location{line: 1, column: 1},
             current_location: Location{line: 1, column: 1},
         }
     }
 
     fn push_token(&mut self, token: TokenType) {
-        self.out_tokens.push(Token{token_type: token, location: self.current_location.clone()});
+        self.out_tokens.push(Token{token_type: token, location: self.token_start});
+        self.token_start = self.current_location;
     }
 
     fn next_char(&mut self) -> std::io::Result<u8> {
@@ -47,6 +50,14 @@ impl Lexer {
 
     fn handle_identifier(&mut self) {
         if self.current_token.is_empty() {
+            self.token_start = self.current_location;
+            return;
+        }
+
+        // Check if it's a keyword
+        if let Some(kw) = Keyword::from_string(self.current_token.as_ref()) {
+            self.push_token(TokenType::Keyword(kw));
+            self.current_token.clear();
             return;
         }
 
@@ -68,13 +79,13 @@ impl Lexer {
             return 
         }
 
-        if let Some(op) = read_operator_type(ch) {
+        if let Some(op) = OperatorType::from_char(ch) {
             self.handle_identifier();
             self.push_token(TokenType::Operator(op));
             return 
         }
 
-        self.current_token.push(ch as char);
+        self.current_token.push(ch);
     }
 
     pub fn read_tokens(&mut self) {
