@@ -55,16 +55,32 @@ pub enum Keyword {
     Fn,
     If,
     While,
+    Void,
+    RawPtr,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Float32,
+    Float64
 }
 
 impl Keyword {
     pub fn from_string(value: &str) -> Option<Keyword> {
         match value {
+            "void" => Some(Keyword::Void),
+            "rawptr" => Some(Keyword::RawPtr),
             "var" => Some(Keyword::Var),
             "return" => Some(Keyword::Return),
             "fn" => Some(Keyword::Fn),
             "if" => Some(Keyword::If),
             "while" => Some(Keyword::While),
+            "int8" => Some(Keyword::Int8),
+            "int16" => Some(Keyword::Int16),
+            "int32" => Some(Keyword::Int32),
+            "int64" => Some(Keyword::Int64),
+            "float32" => Some(Keyword::Float32),
+            "float64" => Some(Keyword::Float64),
             _ => None,
         }
     }

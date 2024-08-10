@@ -1,8 +1,8 @@
-fn fib(n) {
-  var a = 1;
-  var b = 1;
-  var tmp = 0;
-  var index = 0;
+fn fib(n: int32) : int32 {
+  var a: int32 = 1;
+  var b: int32 = 1;
+  var tmp: int32 = 0;
+  var index: int32 = 0;
 
   while index < n {
     tmp = (a + b);

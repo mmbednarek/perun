@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use crate::typing::Type;
 
 #[derive(Debug)]
 pub enum SymbolType {
+    Global,
     FunctionArg(usize),
     LocalVariable,
 }
@@ -10,6 +12,7 @@ pub enum SymbolType {
 pub struct SymbolInfo {
     pub name: String,
     pub sym_type: SymbolType,
+    pub data_type: Type,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -83,6 +86,10 @@ impl SymbolTable {
         }
 
         None
+    }
+
+    pub fn find_by_path(&self, path: &SymbolPath) -> Option<&SymbolInfo> {
+        self.symbols.get(path)
     }
 
     pub fn print_symbols(&self) {

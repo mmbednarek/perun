@@ -2,6 +2,7 @@ use crate::token_reader::TokenReader;
 use crate::token::{TokenType, OperatorType, Location, Keyword};
 use crate::error::CompilerResult;
 use crate::ast::*;
+use crate::typing::Type;
 use std::mem::take;
 
 pub struct Parser<'a> {
@@ -18,9 +19,10 @@ impl<'a> Parser<'a> {
 
         while self.reader.has_tokens() {
             let token = self.reader.next()?;
+            let location = token.location;
             if let TokenType::Keyword(kw) = &token.token_type {
                 if *kw == Keyword::Fn {
-                    let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function()?);
+                    let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function(location)?);
                     result.body.push(func);
                 }
             }
@@ -30,16 +32,20 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    fn parse_function(&mut self) -> CompilerResult<FunctionNode<'a, 'a>> {
+    fn parse_function(&mut self, location: Location) -> CompilerResult<FunctionNode<'a, 'a>> {
         let name = self.reader.expect_identifier()?;
         self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
 
-        let mut params: Vec<String> = Vec::new();
+        let mut params: Vec<FunctionArg> = Vec::new();
 
         let peeked_paren = self.reader.peek()?;
         if peeked_paren.token_type != TokenType::Operator(OperatorType::RightParen) {
             loop {
-                params.push(self.reader.expect_identifier()?);
+                let arg_name = self.reader.expect_identifier()?;
+                self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
+                let arg_type = self.parse_type()?;
+                params.push(FunctionArg{name: arg_name, arg_type});
+                
 
                 let following = self.reader.next()?;
                 if following.token_type == TokenType::Operator(OperatorType::RightParen) {
@@ -50,11 +56,32 @@ impl<'a> Parser<'a> {
             self.reader.next()?;
         }
 
-        self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+        let mut ret_type = Type::Void;
+
+        let token = self.reader.next()?;
+        match token.token_type {
+            TokenType::Operator(OperatorType::Colon) => {
+                ret_type = self.parse_type()?;
+                self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+            },
+            TokenType::Operator(OperatorType::LeftBrace) => {},
+            _ => {
+                compiler_err!(token.location, "invalid token {:?}", token.token_type);
+            }
+        }
 
         let scope = self.parse_scope("entry")?;
 
-        Ok(FunctionNode::<'a, 'a>{name, params, scope})
+        Ok(FunctionNode::<'a, 'a>{location, name, params, scope, ret_type})
+    }
+
+    fn parse_type(&mut self) -> CompilerResult<Type> {
+        let (kw_loc, arg_type_kw) = self.reader.expect_keyword_with_loc()?;
+        let arg_type_res = Type::from_keyword(&arg_type_kw);
+        match arg_type_res  {
+            Some(arg_type) => Ok(arg_type),
+            None => compiler_err!(kw_loc, "invalid type {:?}", arg_type_kw),
+        }
     }
 
     fn parse_scope(&mut self, name: &str) -> CompilerResult<ScopeNode<'a, 'a>> {
@@ -89,9 +116,11 @@ impl<'a> Parser<'a> {
                 },
                 Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
+                    self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
+                    let var_type = self.parse_type()?;
                     self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
-                    return Ok(Box::new(VarDeclNode::<'a, 'a>{location, name, expression}));
+                    return Ok(Box::new(VarDeclNode::<'a, 'a>{location, name, expression, var_type}));
                 },
                 Keyword::If => {
                     return Ok(Box::new(self.parse_if_statement(location)?));
