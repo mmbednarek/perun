@@ -5,9 +5,10 @@ use crate::token::Location;
 use crate::typing::{Type, FuncType};
 
 use inkwell::types::{BasicMetadataTypeEnum, AnyTypeEnum};
-use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, PointerValue};
+use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, PointerValue, BasicMetadataValueEnum};
 use inkwell::basic_block::BasicBlock;
 use inkwell::IntPredicate;
+use either::Either;
 
 fn basic_value_to_int<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<IntValue<'ctx>> {
     if let BasicValueEnum::IntValue(int_val) = value.as_basic_value_enum() {
@@ -128,6 +129,8 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
         };
 
         let function = gen.module.add_function(&self.name, fn_type, None);
+
+        gen.addrtable.register_func(path.sub(&self.name), function);
 
         self.scope.generate_il(gen, &path.sub(&self.name), &function)?;
 
@@ -275,7 +278,6 @@ pub struct ExpressionStatementNode<'ctx, 'st> {
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for ExpressionStatementNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
-        // TODO: Pass void and look up appropriate type 
         self.expression.generate_il(gen, path, function, &Type::Void)?;
         Ok(())
     }
@@ -464,6 +466,48 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for AssignNode<'ctx, 'st> {
 
         wrap_err(self.location, gen.builder.build_store(left_ptr, right_int))?;
         Ok(Box::new(left_ptr))
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct FunctionCall<'ctx, 'st> {
+    pub location: Location,
+    pub name: String,
+    pub args: Vec<ExpressionBox<'ctx, 'st>>,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, _expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
+        let symbol = wrap_option(self.location, gen.symtable.find_symbol(path, &self.name), "fib")?;
+        if let Type::Function(fn_type) = &symbol.data_type {
+            if fn_type.args.len() != self.args.len() {
+                compiler_err!(self.location, "invalid number of arguments");
+            }
+
+            let mut call_args = Vec::<BasicMetadataValueEnum>::new();
+            for (i, arg_expr) in self.args.iter().enumerate() {
+                let arg_type = &fn_type.args[i];
+                let arg_value = arg_expr.generate_il(gen, path, function, arg_type)?;
+                let arg_value_enum = arg_value.as_basic_value_enum();
+                call_args.push(arg_value_enum.into());
+            }
+
+            let func = wrap_option(self.location, gen.addrtable.find_func(path, &self.name), "no function found.")?;
+            let call_res = wrap_err(self.location, gen.builder.build_call(*func, call_args.as_ref(), self.name.as_ref()))?;
+            let res = call_res.try_as_basic_value();
+
+            if let Either::Left(call_res_bv) = res {
+                Ok(Box::new(call_res_bv))
+            } else {
+                compiler_err!(self.location, "call result is not a basic value");
+            }
+        } else {
+            compiler_err!(self.location, "tried to call an object that's not a function");
+        }
     }
 
     fn get_location(&self) -> &Location {

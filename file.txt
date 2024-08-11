@@ -1,6 +1,6 @@
-fn fib(n: int32) : int32 {
-  var a: int32 = 1;
-  var b: int32 = 1;
+fn fib_impl(init_a: int32, init_b: int32, n: int32) : int32 {
+  var a: int32 = init_a;
+  var b: int32 = init_b;
   var tmp: int32 = 0;
   var index: int32 = 0;
 
@@ -14,3 +14,6 @@ fn fib(n: int32) : int32 {
   return b;
 }
 
+fn fib(n: int32): int32 {
+  return fib_impl(1, 2, n);
+}

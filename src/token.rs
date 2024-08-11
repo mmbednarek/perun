@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Location {
     pub line: u32,
     pub column: u32,
@@ -86,7 +86,7 @@ impl Keyword {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenType {
     Identifier(String),
     Number(u64),
@@ -94,6 +94,7 @@ pub enum TokenType {
     Keyword(Keyword),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,
     pub location: Location,

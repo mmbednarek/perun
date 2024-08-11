@@ -31,7 +31,7 @@ impl<'a> TokenReader<'a> {
         }
     }
 
-    pub fn peek(&mut self) -> CompilerResult<&Token> {
+    pub fn peek(&self) -> CompilerResult<&Token> {
         if self.at >= self.tokens.len() {
             compiler_err!(Location{line: 1, column: 1}, "unexpected and of stream");
         }

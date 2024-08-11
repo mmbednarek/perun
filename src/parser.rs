@@ -151,6 +151,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
+        self.parse_expression_until_one_of(&[stop_op])
+    }
+
+    fn parse_expression_until_one_of(&mut self, stop_ops: &[OperatorType]) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
         let mut expr_stack: Vec<Option<Box<dyn ExpressionNode>>> = Vec::new();
         let mut op_stack: Vec<OperatorType> = Vec::new();
 
@@ -161,10 +165,11 @@ impl<'a> Parser<'a> {
         };
 
         loop {
-            let token = self.reader.next()?;
+            let token = self.reader.next()?.clone();
+
             match &token.token_type {
                 TokenType::Operator(op_type) => {
-                    if *op_type == stop_op {
+                    if stop_ops.iter().any(|op| *op_type == *op) {
                         break;
                     } else if *op_type == OperatorType::LeftParen {
                         expr_stack.push(Some(self.parse_expression(OperatorType::RightParen)?));
@@ -176,7 +181,14 @@ impl<'a> Parser<'a> {
                     expr_stack.push(Some(Box::new(NumberNode{location: token.location, number: *num})));
                 },
                 TokenType::Identifier(value) => {
-                    expr_stack.push(Some(Box::new(IdentifierNode{location: token.location, name: value.to_string()})));
+                    let peeked = self.reader.peek()?.clone();
+                    if peeked.token_type == TokenType::Operator(OperatorType::LeftParen) {
+                        self.reader.next()?;
+                        let call = self.parse_function_call(peeked.location, value.as_ref())?;
+                        expr_stack.push(Some(Box::new(call)));
+                    } else {
+                        expr_stack.push(Some(Box::new(IdentifierNode{location: token.location, name: value.to_string()})));
+                    }
                 },
                 TokenType::Keyword(kw) => {
                     compiler_err!(token.location, "unexpected keyword {:?}", kw)
@@ -226,5 +238,28 @@ impl<'a> Parser<'a> {
             Some(expr_value) => Ok(expr_value),
             None => compiler_err!(token_start_loc, "invalid expression"),
         }
+    }
+
+    fn parse_function_call(&mut self, location: Location, name: &str) -> CompilerResult<FunctionCall<'a, 'a>> {
+        let mut args = Vec::new();
+
+        let peek = self.reader.peek()?;
+        if peek.token_type == TokenType::Operator(OperatorType::RightParen) {
+            return Ok(FunctionCall{location, name: name.to_string(), args});
+        }
+
+        loop {
+            let expr = self.parse_expression_until_one_of(&[OperatorType::Comma, OperatorType::RightParen])?;
+            args.push(expr);
+
+            self.reader.seek_back();
+
+            let expr_term = self.reader.next()?;
+            if expr_term.token_type == TokenType::Operator(OperatorType::RightParen) {
+                break;
+            }
+        }
+
+        Ok(FunctionCall{location, name: name.to_string(), args})
     }
 }
