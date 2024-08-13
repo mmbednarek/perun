@@ -5,6 +5,78 @@ use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
 
+struct ExpressionBuilder<'a> {
+    expr_stack: Vec<Option<Box<dyn ExpressionNode<'a, 'a> + 'a>>>,
+    op_stack: Vec<BinaryOperation>,
+    location: Location,
+}
+
+impl<'a> ExpressionBuilder<'a> {
+    fn new(location: Location) -> Self {
+        Self{expr_stack: Vec::new(), op_stack: Vec::new(), location}
+    }
+
+    fn push_expr<T: ExpressionNode<'a, 'a> + 'a>(&mut self, node: T) {
+        self.expr_stack.push(Some(Box::new(node)));
+    }
+
+    fn push_expr_box(&mut self, node: Box<dyn ExpressionNode<'a, 'a> + 'a>) {
+        self.expr_stack.push(Some(node));
+    }
+
+    fn push_op(&mut self, op: BinaryOperation) -> CompilerResult<()> {
+        let mut last_op = self.last_op();
+        while last_op.proceeds(op) {
+            self.process_operator()?;
+            last_op = self.last_op();
+        }
+        self.op_stack.push(op);
+        Ok(())
+    }
+
+    fn last_op(&self) -> BinaryOperation {
+        *self.op_stack.last().unwrap_or(&BinaryOperation::None)
+    }
+
+    fn process_operator(&mut self) -> CompilerResult<()> {
+        let op_res = self.op_stack.pop();
+        if op_res.is_none() {
+            compiler_err!(self.location, "no operators left");
+        }
+
+        let op = op_res.unwrap();
+
+        let right_opt = self.expr_stack.pop();
+        let left_opt = self.expr_stack.pop();
+        if right_opt.is_none() || left_opt.is_none() {
+            compiler_err!(self.location, "invalid expression");
+        }
+
+        let right = right_opt.unwrap().unwrap();
+        let left = left_opt.unwrap().unwrap();
+
+        let location = *left.get_location();
+        self.expr_stack.push(Some(Box::new(BinaryExpressionNode{location, operation: op, left, right})));
+        Ok(())
+    }
+
+    fn build(&mut self) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
+        while !self.op_stack.is_empty() {
+            self.process_operator();
+        }
+
+        if self.expr_stack.len() != 1 {
+            compiler_err!(self.location, "invalid expression");
+        }
+
+        let expr = take(&mut self.expr_stack[0]);
+        match expr {
+            Some(expr_value) => Ok(expr_value),
+            None => compiler_err!(self.location, "invalid expression"),
+        }
+    }
+}
+
 pub struct Parser<'a> {
     reader: &'a mut TokenReader<'a>,
 }
@@ -155,14 +227,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression_until_one_of(&mut self, stop_ops: &[OperatorType]) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
-        let mut expr_stack: Vec<Option<Box<dyn ExpressionNode>>> = Vec::new();
-        let mut op_stack: Vec<OperatorType> = Vec::new();
-
         let peek = self.reader.peek();
         let token_start_loc = match peek {
             Ok(tkn) => tkn.location,
             Err(err) => err.location,
         };
+
+        let mut builder = ExpressionBuilder::new(token_start_loc.clone());
 
         loop {
             let token = self.reader.next()?.clone();
@@ -172,22 +243,24 @@ impl<'a> Parser<'a> {
                     if stop_ops.iter().any(|op| *op_type == *op) {
                         break;
                     } else if *op_type == OperatorType::LeftParen {
-                        expr_stack.push(Some(self.parse_expression(OperatorType::RightParen)?));
+                        builder.push_expr_box(self.parse_expression(OperatorType::RightParen)?);
+                    } else if let Some(binary_op) = BinaryOperation::from_op_type(*op_type) {
+                        builder.push_op(binary_op)?;
                     } else {
-                        op_stack.push(*op_type);
+                        compiler_err!(token.location, "unexpected operator {:?}", op_type);
                     }
                 },
                 TokenType::Number(num) => {
-                    expr_stack.push(Some(Box::new(NumberNode{location: token.location, number: *num})));
+                    builder.push_expr(NumberNode{location: token.location, number: *num});
                 },
                 TokenType::Identifier(value) => {
                     let peeked = self.reader.peek()?.clone();
                     if peeked.token_type == TokenType::Operator(OperatorType::LeftParen) {
                         self.reader.next()?;
                         let call = self.parse_function_call(peeked.location, value.as_ref())?;
-                        expr_stack.push(Some(Box::new(call)));
+                        builder.push_expr(call);
                     } else {
-                        expr_stack.push(Some(Box::new(IdentifierNode{location: token.location, name: value.to_string()})));
+                        builder.push_expr(IdentifierNode{location: token.location, name: value.to_string()});
                     }
                 },
                 TokenType::Keyword(kw) => {
@@ -196,48 +269,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        expr_stack.reverse();
-        op_stack.reverse();
-
-        while !op_stack.is_empty() {
-            let op_res = op_stack.pop();
-            if op_res.is_none() {
-                break
-            }
-
-            let op = op_res.unwrap();
-
-            let left_opt = expr_stack.pop();
-            let right_opt = expr_stack.pop();
-            if right_opt.is_none() || left_opt.is_none() {
-                compiler_err!(token_start_loc, "invalid expression");
-            }
-
-            let left = left_opt.unwrap().unwrap();
-            let right = right_opt.unwrap().unwrap();
-
-            let location = *left.get_location();
-
-            match op {
-                OperatorType::Plus => {expr_stack.push(Some(Box::new(PlusNode{location, left, right})));}
-                OperatorType::Minus => {expr_stack.push(Some(Box::new(MinusNode{location, left, right})));}
-                OperatorType::Asterisk => {expr_stack.push(Some(Box::new(MultNode{location, left, right})));}
-                OperatorType::Slash => {expr_stack.push(Some(Box::new(DivNode{location, left, right})));}
-                OperatorType::Less => {expr_stack.push(Some(Box::new(LessNode{location, left, right})));}
-                OperatorType::Equals => {expr_stack.push(Some(Box::new(AssignNode{location, left, right})));}
-                _ => compiler_err!(location, "invalid expression"),
-            }
-        }
-
-        if expr_stack.len() != 1 {
-            compiler_err!(token_start_loc, "invalid expression");
-        }
-
-        let expr = take(&mut expr_stack[0]);
-        match expr {
-            Some(expr_value) => Ok(expr_value),
-            None => compiler_err!(token_start_loc, "invalid expression"),
-        }
+        return builder.build();
     }
 
     fn parse_function_call(&mut self, location: Location, name: &str) -> CompilerResult<FunctionCall<'a, 'a>> {

@@ -1,7 +1,7 @@
 use crate::ilgen::IlGenerator;
 use crate::symbols::{SymbolPath, SymbolTable, SymbolInfo, SymbolType};
 use crate::error::{CompilerResult, wrap_option, wrap_err};
-use crate::token::Location;
+use crate::token::{Location, OperatorType};
 use crate::typing::{Type, FuncType};
 
 use inkwell::types::{BasicMetadataTypeEnum, AnyTypeEnum};
@@ -9,6 +9,89 @@ use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, Point
 use inkwell::basic_block::BasicBlock;
 use inkwell::IntPredicate;
 use either::Either;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BinaryOperation {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Less,
+    Assign,
+    None,
+}
+
+impl BinaryOperation {
+    pub fn from_op_type(op_type: OperatorType) -> Option<BinaryOperation> {
+        match op_type {
+            OperatorType::Plus => Some(BinaryOperation::Add),
+            OperatorType::Minus => Some(BinaryOperation::Subtract),
+            OperatorType::Asterisk => Some(BinaryOperation::Multiply),
+            OperatorType::Slash => Some(BinaryOperation::Divide),
+            OperatorType::Less => Some(BinaryOperation::Less),
+            OperatorType::Equals => Some(BinaryOperation::Assign),
+            _ => None
+        }
+    }
+
+    pub fn proceedence(&self) -> i32 {
+        match self {
+            BinaryOperation::Add => 3,
+            BinaryOperation::Subtract => 3,
+            BinaryOperation::Divide => 4,
+            BinaryOperation::Multiply => 4,
+            BinaryOperation::Less => 2,
+            BinaryOperation::Assign => 1,
+            BinaryOperation::None => 0,
+        }
+    }
+
+    pub fn proceeds(&self, other: BinaryOperation) -> bool {
+        self.proceedence() >= other.proceedence()
+    }
+
+    pub fn build<'ctx, 'st>(&self, gen: &mut IlGenerator<'ctx, 'st>, location: &Location, data_type: &Type, lhs: &dyn BasicValue<'ctx>, rhs: &dyn BasicValue<'ctx>) -> CompilerResult<BasicValueBox<'ctx>> {
+        if *self == BinaryOperation::Assign {
+            let lhs_ptr = basic_value_to_ptr(*location, lhs)?;
+            let rhs_int = basic_value_to_int(*location, rhs)?;
+
+            if data_type.is_int_type() {
+                wrap_err(*location, gen.builder.build_store(lhs_ptr, rhs_int))?;
+                return Ok(Box::new(lhs_ptr));
+            }
+
+            compiler_err!(*location, "undefined operation");
+        }
+
+        if data_type.is_int_type() {
+            let lhs_int = basic_value_to_int(*location, lhs)?;
+            let rhs_int = basic_value_to_int(*location, rhs)?;
+
+            match self {
+                BinaryOperation::Add => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_add(lhs_int, rhs_int, "sum"))?));
+                },
+                BinaryOperation::Subtract => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_sub(lhs_int, rhs_int, "sub"))?));
+                },
+                BinaryOperation::Divide => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_signed_div(lhs_int, rhs_int, "div"))?));
+                },
+                BinaryOperation::Multiply => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_mul(lhs_int, rhs_int, "mul"))?));
+                },
+                BinaryOperation::Less => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_compare(IntPredicate::SLT, lhs_int, rhs_int, "less"))?));
+                },
+                _ => {
+                    compiler_err!(*location, "invalid operation");
+                },
+            };
+        }
+
+        compiler_err!(*location, "invalid type");
+    }
+}
 
 fn basic_value_to_int<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<IntValue<'ctx>> {
     if let BasicValueEnum::IntValue(int_val) = value.as_basic_value_enum() {
@@ -341,131 +424,22 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
 }
 
 #[derive(Debug)]
-pub struct PlusNode<'ctx, 'st> {
+pub struct BinaryExpressionNode<'ctx, 'st> {
     pub location: Location,
+    pub operation: BinaryOperation,
     pub left: ExpressionBox<'ctx, 'st>,
     pub right: ExpressionBox<'ctx, 'st>,
 }
 
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for PlusNode<'ctx, 'st> {
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, expected_type)?;
-        let left_int = basic_value_to_int(self.location, left.as_ref())?;
+        // For assigment we always expect the left hand side to be an l-value.
+        let left_expected_type = if self.operation == BinaryOperation::Assign { &Type::RawPtr } else { expected_type };
+
+        let left = self.left.generate_il(gen, path, function, left_expected_type)?;
         let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
 
-        Ok(Box::new(wrap_err(self.location, gen.builder.build_int_add(left_int, right_int, "sum"))?))
-    }
-
-    fn get_location(&self) -> &Location {
-        &self.location
-    }
-}
-
-#[derive(Debug)]
-pub struct MinusNode<'ctx, 'st> {
-    pub location: Location,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
-}
-
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for MinusNode<'ctx, 'st> {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, expected_type)?;
-        let left_int = basic_value_to_int(self.location, left.as_ref())?;
-        let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
-
-        Ok(Box::new(wrap_err(self.location, gen.builder.build_int_sub(left_int, right_int, "sub"))?))
-    }
-
-    fn get_location(&self) -> &Location {
-        &self.location
-    }
-}
-
-#[derive(Debug)]
-pub struct MultNode<'ctx, 'st> {
-    pub location: Location,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
-}
-
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for MultNode<'ctx, 'st> {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, expected_type)?;
-        let left_int = basic_value_to_int(self.location, left.as_ref())?;
-        let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
-
-        Ok(Box::new(wrap_err(self.location, gen.builder.build_int_mul(left_int, right_int, "mult"))?))
-    }
-
-    fn get_location(&self) -> &Location {
-        &self.location
-    }
-}
-
-#[derive(Debug)]
-pub struct DivNode<'ctx, 'st> {
-    pub location: Location,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
-}
-
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for DivNode<'ctx, 'st> {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, expected_type)?;
-        let left_int = basic_value_to_int(self.location, left.as_ref())?;
-        let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
-
-        Ok(Box::new(wrap_err(self.location, gen.builder.build_int_signed_div(left_int, right_int, "div"))?))
-    }
-
-    fn get_location(&self) -> &Location {
-        &self.location
-    }
-}
-
-#[derive(Debug)]
-pub struct LessNode<'ctx, 'st> {
-    pub location: Location,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
-}
-
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for LessNode<'ctx, 'st> {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, expected_type)?;
-        let left_int = basic_value_to_int(self.location, left.as_ref())?;
-        let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
-
-        Ok(Box::new(wrap_err(self.location, gen.builder.build_int_compare(IntPredicate::SLT, left_int, right_int, "less"))?))
-    }
-
-    fn get_location(&self) -> &Location {
-        &self.location
-    }
-}
-
-#[derive(Debug)]
-pub struct AssignNode<'ctx, 'st> {
-    pub location: Location,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
-}
-
-impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for AssignNode<'ctx, 'st> {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let left = self.left.generate_il(gen, path, function, &Type::RawPtr)?;
-        let left_ptr = basic_value_to_ptr(self.location, left.as_ref())?;
-        let right = self.right.generate_il(gen, path, function, expected_type)?;
-        let right_int = basic_value_to_int(self.location, right.as_ref())?;
-
-        wrap_err(self.location, gen.builder.build_store(left_ptr, right_int))?;
-        Ok(Box::new(left_ptr))
+        self.operation.build(gen, &self.location, &Type::Int32, left.as_ref(), right.as_ref())
     }
 
     fn get_location(&self) -> &Location {

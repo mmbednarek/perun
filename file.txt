@@ -5,15 +5,15 @@ fn fib_impl(init_a: int32, init_b: int32, n: int32) : int32 {
   var index: int32 = 0;
 
   while index < n {
-    tmp = (a + b);
+    tmp = a + b;
     a = b;
     b = tmp;
-    index = (index + 1);
+    index = index + 1;
   }
 
   return b;
 }
 
 fn fib(n: int32): int32 {
-  return fib_impl(1, 2, n);
+  return fib_impl(1, 1, n);
 }
