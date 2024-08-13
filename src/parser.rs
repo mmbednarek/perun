@@ -188,9 +188,16 @@ impl<'a> Parser<'a> {
                 },
                 Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
-                    self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
-                    let var_type = self.parse_type()?;
-                    self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
+                    let token = self.reader.next()?;
+
+                    let mut var_type: Option<Type> = None;
+                    if token.token_type == TokenType::Operator(OperatorType::Colon) {
+                        var_type = Some(self.parse_type()?);
+                        self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
+                    } else if token.token_type != TokenType::Operator(OperatorType::Equals) {
+                        compiler_err!(location, "expected equal sign");
+                    }
+
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
                     return Ok(Box::new(VarDeclNode::<'a, 'a>{location, name, expression, var_type}));
                 },

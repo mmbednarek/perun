@@ -4,7 +4,7 @@ use crate::error::{CompilerResult, wrap_option, wrap_err};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, FuncType};
 
-use inkwell::types::{BasicMetadataTypeEnum, AnyTypeEnum};
+use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, VoidType};
 use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, PointerValue, BasicMetadataValueEnum};
 use inkwell::basic_block::BasicBlock;
 use inkwell::IntPredicate;
@@ -266,15 +266,21 @@ pub struct VarDeclNode<'ctx, 'st> {
     pub location: Location,
     pub name: String,
     pub expression: ExpressionBox<'ctx, 'st>,
-    pub var_type: Type,
+    pub var_type: Option<Type>,
 }
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
-        let addr = gen.alloc_var(self.location, &self.var_type, &self.name)?;
+        let var_type = if let Some(vt) = &self.var_type {
+            vt
+        } else {
+            &self.expression.deduce_type(&gen.symtable, path, &Type::Void)?
+        };
+        
+        let addr = gen.alloc_var(self.location, var_type, &self.name)?;
         gen.addrtable.register_ptr(path.sub(self.name.as_ref()), addr);
 
-        let value = self.expression.generate_il(gen, path, function, &self.var_type)?;
+        let value = self.expression.generate_il(gen, path, function, var_type)?;
         let int_value = basic_value_to_int(self.location, value.as_ref())?;
         wrap_err(self.location, gen.builder.build_store(addr, int_value))?;
 
@@ -282,7 +288,12 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) {
-        symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::LocalVariable, data_type: self.var_type.clone()});
+        let var_type = if let Some(vt) = &self.var_type {
+            vt
+        } else {
+            &self.expression.deduce_type(&symtable, path, &Type::Void).unwrap()
+        };
+        symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::LocalVariable, data_type: var_type.clone()});
     }
 }
 
@@ -414,8 +425,8 @@ pub struct NumberNode {
 }
 
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, _path: &SymbolPath, _function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let num_type = if expected_type.is_int_type() { expected_type.clone() } else { Type::Int64 };
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, _function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
+        let num_type = self.deduce_type(&gen.symtable, path, expected_type)?;
         let llvm_type = wrap_option(self.location, num_type.to_llvm_type(gen.context), "unable to map llvm type")?;
         if let AnyTypeEnum::IntType(it) = llvm_type {
             Ok(Box::new(it.const_int(self.number, true)))
@@ -425,7 +436,13 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
     }
 
     fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
-        if expected_type.is_int_type() { Ok(expected_type.clone()) } else { Ok(Type::Int64) }
+        if expected_type.is_int_type() { Ok(expected_type.clone()) } else {
+            if u32::try_from(self.number).is_ok() {
+                Ok(Type::Int32)
+            } else {
+                Ok(Type::Int64)
+            }
+        }
     }
 
     fn get_location(&self) -> &Location {

@@ -1,8 +1,8 @@
 fn fib_impl(init_a: int32, init_b: int32, n: int32) : int32 {
-  var a: int32 = init_a;
-  var b: int32 = init_b;
-  var tmp: int32 = 0;
-  var index: int32 = 0;
+  var a = init_a;
+  var b = init_b;
+  var tmp = 0;
+  var index = 0;
 
   while index < n {
     tmp = a + b;
