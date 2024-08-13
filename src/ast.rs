@@ -121,6 +121,7 @@ pub trait StatementNode<'ctx, 'st> : std::fmt::Debug {
 
 pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>>;
+    fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type>;
     fn get_location(&self) -> &Location;
 }
 
@@ -396,6 +397,11 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
         }
     }
 
+    fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        let symbol = wrap_option(self.location, symtable.find_symbol(path, &self.name), "symbol not found")?;
+        Ok(symbol.data_type.clone())
+    }
+
     fn get_location(&self) -> &Location {
         &self.location
     }
@@ -418,6 +424,10 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
         }
     }
 
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
+        if expected_type.is_int_type() { Ok(expected_type.clone()) } else { Ok(Type::Int64) }
+    }
+
     fn get_location(&self) -> &Location {
         &self.location
     }
@@ -435,11 +445,17 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
         // For assigment we always expect the left hand side to be an l-value.
         let left_expected_type = if self.operation == BinaryOperation::Assign { &Type::RawPtr } else { expected_type };
+        let deduced_type = self.left.deduce_type(gen.symtable, path, expected_type)?;
 
         let left = self.left.generate_il(gen, path, function, left_expected_type)?;
         let right = self.right.generate_il(gen, path, function, expected_type)?;
 
-        self.operation.build(gen, &self.location, &Type::Int32, left.as_ref(), right.as_ref())
+
+        self.operation.build(gen, &self.location, &deduced_type, left.as_ref(), right.as_ref())
+    }
+
+    fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
+        self.left.deduce_type(symtable, path, expected_type)
     }
 
     fn get_location(&self) -> &Location {
@@ -456,7 +472,7 @@ pub struct FunctionCall<'ctx, 'st> {
 
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, _expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
-        let symbol = wrap_option(self.location, gen.symtable.find_symbol(path, &self.name), "fib")?;
+        let symbol = wrap_option(self.location, gen.symtable.find_symbol(path, &self.name), "unable to find function")?;
         if let Type::Function(fn_type) = &symbol.data_type {
             if fn_type.args.len() != self.args.len() {
                 compiler_err!(self.location, "invalid number of arguments");
@@ -482,6 +498,15 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
         } else {
             compiler_err!(self.location, "tried to call an object that's not a function");
         }
+    }
+
+    fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        let symbol = wrap_option(self.location, symtable.find_symbol(path, &self.name), "unable to find function")?;
+        if let Type::Function(fn_type) = &symbol.data_type {
+            return Ok(fn_type.ret_type.clone());
+        }
+
+        compiler_err!(self.location, "tried to call an object that's not a function");
     }
 
     fn get_location(&self) -> &Location {
