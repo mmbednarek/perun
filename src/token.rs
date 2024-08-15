@@ -75,12 +75,12 @@ impl Keyword {
             "fn" => Some(Keyword::Fn),
             "if" => Some(Keyword::If),
             "while" => Some(Keyword::While),
-            "int8" => Some(Keyword::Int8),
-            "int16" => Some(Keyword::Int16),
-            "int32" => Some(Keyword::Int32),
-            "int64" => Some(Keyword::Int64),
-            "float32" => Some(Keyword::Float32),
-            "float64" => Some(Keyword::Float64),
+            "i8" => Some(Keyword::Int8),
+            "i16" => Some(Keyword::Int16),
+            "i32" => Some(Keyword::Int32),
+            "i64" => Some(Keyword::Int64),
+            "f32" => Some(Keyword::Float32),
+            "f64" => Some(Keyword::Float64),
             _ => None,
         }
     }

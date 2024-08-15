@@ -3,13 +3,13 @@ use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::types::AnyTypeEnum;
-use inkwell::values::{PointerValue, BasicValueEnum};
+use inkwell::values::{PointerValue, BasicValueEnum, BasicValue};
 use inkwell::OptimizationLevel;
 use crate::token::Location;
 use crate::symbols::{SymbolTable, SymbolInfo, SymbolPath};
 use crate::address_table::AddressTable;
 use crate::typing::Type;
-use crate::error::{CompilerResult, CompilerError, wrap_option, wrap_err};
+use crate::error::{CompilerResult, CompilerError, wrap_option, wrap_err, err_with_location};
 
 type FibFunc = unsafe extern "C" fn(u64) -> u64;
 
@@ -69,9 +69,12 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
     }
 
     pub fn find_symbol_with_addr(&self, location: Location, path: &SymbolPath, name: &str) -> CompilerResult<(&SymbolInfo, &PointerValue<'ctx>)> {
-        let msg = format!("unable to find symbol {}", name);
-        let sym = wrap_option(location, self.symtable.find_symbol(path, name), msg.as_ref())?;
-        let ptr = wrap_option(location, self.addrtable.find_symbol(path, name), msg.as_ref())?;
+        let sym = err_with_location(location, self.symtable.find_symbol(path, name))?;
+        let ptr = err_with_location(location, self.addrtable.find_symbol(path, name))?;
         Ok((sym, ptr))
+    }
+
+    pub fn null_ptr(&self) -> Box<dyn BasicValue<'ctx> + 'ctx>{
+        Box::new(self.context.ptr_type(0.into()).const_null())
     }
 }

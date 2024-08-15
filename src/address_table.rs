@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use crate::symbols::SymbolPath;
+use crate::{error::SymbolLookupError, symbols::SymbolPath};
+use crate::error::SymbolLookupResult;
 use inkwell::values::{PointerValue, FunctionValue};
 
 pub struct AddressTable<'ctx> {
@@ -20,18 +21,18 @@ impl<'ctx> AddressTable<'ctx> {
         self.functions.insert(path, func);
     }
 
-    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> Option<&PointerValue<'ctx>> {
+    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&PointerValue<'ctx>> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
             let sym = self.pointers.get(&path.sub(name));
-            if sym.is_some() {
-                return sym;
+            if let Some(symbol) = sym {
+                return Ok(symbol);
             }
             path.truncate_to_parent();
         }
 
-        None
+        Err(SymbolLookupError::NoSymbolFound(name.to_string()))
     }
 
     pub fn find_func(&self, lookup_path: &SymbolPath, name: &str) -> Option<&FunctionValue<'ctx>> {

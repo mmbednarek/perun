@@ -60,7 +60,11 @@ fn main() -> std::io::Result<()> {
 
 
     let path = SymbolPath::new();
-    parsed.collect_symbols(&path, &mut sym_table);
+    let collect_symbols_res = parsed.collect_symbols(&path, &mut sym_table);
+    if let Err(err) = &collect_symbols_res {
+        eprintln!("Failed to collect symbols (line {}, column {}): {}", err.location.line, err.location.column, err.message);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
+    }
 
     let mut generator = IlGenerator::new(&il_context, &sym_table);
     let generatge_res = parsed.generate_il(&mut generator, &path);

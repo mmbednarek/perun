@@ -1,4 +1,5 @@
-fn fib_impl(init_a: int32, init_b: int32, n: int32) : int32 {
+
+fn fib_impl(init_a: i32, init_b: i32, n: i32): i32 {
   var a = init_a;
   var b = init_b;
   var tmp = 0;
@@ -14,6 +15,6 @@ fn fib_impl(init_a: int32, init_b: int32, n: int32) : int32 {
   return b;
 }
 
-fn fib(n: int32): int32 {
+fn fib(n: i32): i32 {
   return fib_impl(1, 1, n);
 }

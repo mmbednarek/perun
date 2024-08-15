@@ -64,4 +64,9 @@ impl Type {
     }
 }
 
-
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueType {
+    RValue,
+    LValue,
+    None,
+}

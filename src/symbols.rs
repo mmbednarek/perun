@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use crate::typing::Type;
+use crate::error::{SymbolLookupError, SymbolLookupResult};
 
 #[derive(Debug)]
 pub enum SymbolType {
@@ -74,18 +75,18 @@ impl SymbolTable {
         self.symbols.insert(sympath.sub(&syminfo.name), syminfo);
     }
 
-    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> Option<&SymbolInfo> {
+    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&SymbolInfo> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
             let sym = self.symbols.get(&path.sub(name));
-            if sym.is_some() {
-                return sym;
+            if let Some(symbol) = sym {
+                return Ok(symbol);
             }
             path.truncate_to_parent();
         }
 
-        None
+        Err(SymbolLookupError::NoSymbolFound(name.to_string()))
     }
 
     pub fn find_by_path(&self, path: &SymbolPath) -> Option<&SymbolInfo> {
