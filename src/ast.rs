@@ -18,7 +18,6 @@ pub enum BinaryOperation {
     Divide,
     Less,
     Assign,
-    None,
 }
 
 impl BinaryOperation {
@@ -42,11 +41,10 @@ impl BinaryOperation {
             BinaryOperation::Multiply => 4,
             BinaryOperation::Less => 2,
             BinaryOperation::Assign => 1,
-            BinaryOperation::None => 0,
         }
     }
 
-    pub fn proceeds(&self, other: BinaryOperation) -> bool {
+    pub fn proceeds(&self, other: &BinaryOperation) -> bool {
         self.proceedence() >= other.proceedence()
     }
 
@@ -93,18 +91,66 @@ impl BinaryOperation {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum SingularOperation {
+    AddressOf,
+    Deference,
+}
+
+impl SingularOperation {
+    pub fn from_op_type(op_type: OperatorType) -> Option<SingularOperation> {
+        match op_type {
+            OperatorType::Ampersand => Some(SingularOperation::AddressOf),
+            OperatorType::Asterisk => Some(SingularOperation::Deference),
+            _ => None
+        }
+    }
+}
+
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum AnyOperation {
+    Singular(SingularOperation),
+    Binary(BinaryOperation),
+    None,
+}
+
+impl AnyOperation {
+    pub fn from_op_type(op_type: OperatorType, last_token_is_op: bool) -> Option<AnyOperation> {
+        if last_token_is_op {
+            Some(AnyOperation::Singular(SingularOperation::from_op_type(op_type)?))
+        } else {
+            Some(AnyOperation::Binary(BinaryOperation::from_op_type(op_type)?))
+        }
+    }
+
+    pub fn proceeds(&self, other: &AnyOperation) -> bool {
+        match self {
+            AnyOperation::Singular(_) => true,
+            AnyOperation::Binary(self_bin) => match other {
+                AnyOperation::Singular(_) => false,
+                AnyOperation::Binary(other_bin) => self_bin.proceeds(other_bin),
+                AnyOperation::None => false,
+            }
+            AnyOperation::None => false,
+        }
+    }
+}
+
 fn basic_value_to_int<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<IntValue<'ctx>> {
     if let BasicValueEnum::IntValue(int_val) = value.as_basic_value_enum() {
         return Ok(int_val);
+    } else {
+        compiler_err!(location, "invalid type");
     }
-    compiler_err!(location, "invalid type")
 }
 
 fn basic_value_to_ptr<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<PointerValue<'ctx>> {
     if let BasicValueEnum::PointerValue(ptr_val) = value.as_basic_value_enum() {
         return Ok(ptr_val);
+    } else {
+        compiler_err!(location, "invalid type");
     }
-    compiler_err!(location, "invalid type")
 }
 
 type BasicValueBox<'ctx> = Box<dyn BasicValue<'ctx> + 'ctx>;
@@ -288,10 +334,18 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
         gen.addrtable.register_ptr(path.sub(self.name.as_ref()), addr);
 
         let value = self.expression.generate_il(gen, path, function, &symbol.data_type, &ValueType::RValue)?;
-        let int_value = basic_value_to_int(self.location, value.as_ref())?;
-        wrap_err(self.location, gen.builder.build_store(addr, int_value))?;
+        if symbol.data_type.is_int_type() {
+            let int_value = basic_value_to_int(self.location, value.as_ref())?;
+            wrap_err(self.location, gen.builder.build_store(addr, int_value))?;
+            Ok(())
+        } else if symbol.data_type == Type::RawPtr {
+            let ptr_value = basic_value_to_ptr(self.location, value.as_ref())?;
+            wrap_err(self.location, gen.builder.build_store(addr, ptr_value))?;
+            Ok(())
+        } else {
+            compiler_err!(self.location, "unsupported variable type")
+        }
 
-        Ok(())
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
@@ -477,10 +531,10 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
         // For assigment we always expect the left hand side to be an l-value.
         let left_value_type = if self.operation == BinaryOperation::Assign { &ValueType::LValue } else { &ValueType::RValue };
-        let deduced_type = self.left.deduce_type(gen.symtable, path, expected_type)?;
+        let deduced_type = self.right.deduce_type(gen.symtable, path, expected_type)?;
 
-        let left = self.left.generate_il(gen, path, function, expected_type, left_value_type)?;
-        let right = self.right.generate_il(gen, path, function, expected_type, &ValueType::RValue)?;
+        let left = self.left.generate_il(gen, path, function, &deduced_type, left_value_type)?;
+        let right = self.right.generate_il(gen, path, function, &deduced_type, &ValueType::RValue)?;
 
 
         self.operation.build(gen, &self.location, &deduced_type, left.as_ref(), right.as_ref())
@@ -488,6 +542,56 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
         self.left.deduce_type(symtable, path, expected_type)
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct SingularExpressionNode<'ctx, 'st> {
+    pub location: Location,
+    pub operation: SingularOperation,
+    pub expr: ExpressionBox<'ctx, 'st>,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+        match self.operation {
+            SingularOperation::AddressOf => {
+                if *value_type == ValueType::LValue {
+                    compiler_err!(self.location, "tried to interpret assignment expression as an l-value");
+                }
+                self.expr.generate_il(r#gen, path, function, expected_type, &ValueType::LValue)
+            },
+            SingularOperation::Deference => {
+                let ptr_box = self.expr.generate_il(r#gen, path, function, &Type::RawPtr, &ValueType::RValue)?;
+                match value_type {
+                    ValueType::LValue => {
+                        Ok(ptr_box)
+                    },
+                    ValueType::RValue => {
+                        let ptr = basic_value_to_ptr(self.location, ptr_box.as_ref())?;
+                        Ok(Box::new(gen.load_var(self.location, expected_type, &ptr, "deref")?))
+                    },
+                    ValueType::None => {
+                        Ok(gen.null_ptr())
+                    }
+                }
+            },
+        }
+    }
+
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
+        match self.operation {
+            SingularOperation::AddressOf => {
+                Ok(Type::RawPtr)
+            },
+            SingularOperation::Deference => {
+                Ok(expected_type.clone())
+            },
+        }
     }
 
     fn get_location(&self) -> &Location {

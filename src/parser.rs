@@ -7,26 +7,35 @@ use std::mem::take;
 
 struct ExpressionBuilder<'a> {
     expr_stack: Vec<Option<Box<dyn ExpressionNode<'a, 'a> + 'a>>>,
-    op_stack: Vec<BinaryOperation>,
+    op_stack: Vec<AnyOperation>,
+    last_is_op: bool,
     location: Location,
 }
 
 impl<'a> ExpressionBuilder<'a> {
     fn new(location: Location) -> Self {
-        Self{expr_stack: Vec::new(), op_stack: Vec::new(), location}
+        Self{expr_stack: Vec::new(), op_stack: Vec::new(), last_is_op: true, location}
     }
 
     fn push_expr<T: ExpressionNode<'a, 'a> + 'a>(&mut self, node: T) {
         self.expr_stack.push(Some(Box::new(node)));
+        self.last_is_op = false;
     }
 
     fn push_expr_box(&mut self, node: Box<dyn ExpressionNode<'a, 'a> + 'a>) {
         self.expr_stack.push(Some(node));
+        self.last_is_op = false;
     }
 
-    fn push_op(&mut self, op: BinaryOperation) -> CompilerResult<()> {
+    fn push_op(&mut self, op_type: &OperatorType) -> CompilerResult<()> {
+        let op_res = AnyOperation::from_op_type(*op_type, self.last_is_op);
+        if let None = op_res {
+            compiler_err!(self.location, "failed to read operator");
+        }
+        let op = op_res.unwrap();
+
         let mut last_op = self.last_op();
-        while last_op.proceeds(op) {
+        while last_op.proceeds(&op) {
             self.process_operator()?;
             last_op = self.last_op();
         }
@@ -34,8 +43,8 @@ impl<'a> ExpressionBuilder<'a> {
         Ok(())
     }
 
-    fn last_op(&self) -> BinaryOperation {
-        *self.op_stack.last().unwrap_or(&BinaryOperation::None)
+    fn last_op(&self) -> AnyOperation {
+        *self.op_stack.last().unwrap_or(&AnyOperation::None)
     }
 
     fn process_operator(&mut self) -> CompilerResult<()> {
@@ -45,18 +54,32 @@ impl<'a> ExpressionBuilder<'a> {
         }
 
         let op = op_res.unwrap();
+        match op {
+            AnyOperation::Singular(sin_op) => {
+                let expr_opt = self.expr_stack.pop();
+                if expr_opt.is_none() {
+                    compiler_err!(self.location, "invalid expression");
+                }
+                let expr = expr_opt.unwrap().unwrap();
+                let location = *expr.get_location();
+                self.expr_stack.push(Some(Box::new(SingularExpressionNode{location, operation: sin_op, expr})));
+            },
+            AnyOperation::Binary(bin_op) => {
+                let right_opt = self.expr_stack.pop();
+                let left_opt = self.expr_stack.pop();
+                if right_opt.is_none() || left_opt.is_none() {
+                    compiler_err!(self.location, "invalid expression");
+                }
 
-        let right_opt = self.expr_stack.pop();
-        let left_opt = self.expr_stack.pop();
-        if right_opt.is_none() || left_opt.is_none() {
-            compiler_err!(self.location, "invalid expression");
-        }
+                let right = right_opt.unwrap().unwrap();
+                let left = left_opt.unwrap().unwrap();
 
-        let right = right_opt.unwrap().unwrap();
-        let left = left_opt.unwrap().unwrap();
+                let location = *left.get_location();
+                self.expr_stack.push(Some(Box::new(BinaryExpressionNode{location, operation: bin_op, left, right})));
+            }
+            AnyOperation::None => {compiler_err!(self.location, "invalid expression")},
+        };
 
-        let location = *left.get_location();
-        self.expr_stack.push(Some(Box::new(BinaryExpressionNode{location, operation: op, left, right})));
         Ok(())
     }
 
@@ -251,10 +274,8 @@ impl<'a> Parser<'a> {
                         break;
                     } else if *op_type == OperatorType::LeftParen {
                         builder.push_expr_box(self.parse_expression(OperatorType::RightParen)?);
-                    } else if let Some(binary_op) = BinaryOperation::from_op_type(*op_type) {
-                        builder.push_op(binary_op)?;
                     } else {
-                        compiler_err!(token.location, "unexpected operator {:?}", op_type);
+                        builder.push_op(op_type)?;
                     }
                 },
                 TokenType::Number(num) => {

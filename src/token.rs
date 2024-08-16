@@ -21,6 +21,7 @@ pub enum OperatorType {
     Slash,
     Less,
     Greater,
+    Ampersand,
 }
 
 impl OperatorType {
@@ -42,6 +43,7 @@ impl OperatorType {
             '/' => Some(OperatorType::Slash),
             '<' => Some(OperatorType::Less),
             '>' => Some(OperatorType::Greater),
+            '&' => Some(OperatorType::Ampersand),
             _ => None,
         }
     }
