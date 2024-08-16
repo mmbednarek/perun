@@ -16,9 +16,11 @@ fn fib_impl(init_a: i32, init_b: i32, n: i32): i32 {
 }
 
 fn fib(n: i32): i32 {
-  var value = n;
+  var value = 5;
   var value_ptr = &value;
-  *value_ptr = 6;
+  *value_ptr = n;
+
+  // print("hello");
 
   return fib_impl(1, 1, value);
 }

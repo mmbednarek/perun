@@ -12,10 +12,18 @@ fn is_wide_space(ch: char) -> bool {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum LexState {
+    Global,
+    PreComment,
+    CommentSingleLine,
+}
+
 pub struct Lexer {
     reader: Box<dyn Read>,
     out_tokens: Vec<Token>,
     current_token: String,
+    state: LexState,
     token_start: Location,
     current_location: Location,
 }
@@ -26,6 +34,7 @@ impl Lexer {
             reader,
             out_tokens: Vec::new(),
             current_token: String::new(),
+            state: LexState::Global,
             token_start: Location{line: 1, column: 1},
             current_location: Location{line: 1, column: 1},
         }
@@ -74,18 +83,42 @@ impl Lexer {
     }
 
     fn handle_char(&mut self, ch: char) {
-        if is_wide_space(ch) {
-            self.handle_identifier();
-            return 
+        match self.state {
+            LexState::PreComment => {
+                if ch == '/' {
+                    self.state = LexState::CommentSingleLine;
+                } else {
+                    self.state = LexState::Global;
+                    self.push_token(TokenType::Operator(OperatorType::Slash));
+                }
+            },
+            LexState::CommentSingleLine => {
+                if ch == '\n' {
+                    self.state = LexState::Global;
+                }
+            },
+            LexState::Global => {
+                if is_wide_space(ch) {
+                    self.handle_identifier();
+                    return 
+                }
+
+                if ch == '/' {
+                    self.handle_identifier();
+                    self.state = LexState::PreComment;
+                    return
+                }
+
+                if let Some(op) = OperatorType::from_char(ch) {
+                    self.handle_identifier();
+                    self.push_token(TokenType::Operator(op));
+                    return 
+                }
+
+                self.current_token.push(ch);
+            },
         }
 
-        if let Some(op) = OperatorType::from_char(ch) {
-            self.handle_identifier();
-            self.push_token(TokenType::Operator(op));
-            return 
-        }
-
-        self.current_token.push(ch);
     }
 
     pub fn read_tokens(&mut self) {
