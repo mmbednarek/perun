@@ -12,6 +12,8 @@ pub enum OperatorType {
     RightParen,
     LeftBrace,
     RightBrace,
+    LeftSquare,
+    RightSquare,
     Dot,
     Comma,
     Colon,
@@ -22,6 +24,7 @@ pub enum OperatorType {
     Less,
     Greater,
     Ampersand,
+    Percent,
 }
 
 impl OperatorType {
@@ -34,6 +37,8 @@ impl OperatorType {
             ')' => Some(OperatorType::RightParen),
             '{' => Some(OperatorType::LeftBrace),
             '}' => Some(OperatorType::RightBrace),
+            '[' => Some(OperatorType::LeftSquare),
+            ']' => Some(OperatorType::RightSquare),
             '.' => Some(OperatorType::Dot),
             ',' => Some(OperatorType::Comma),
             ':' => Some(OperatorType::Colon),
@@ -44,6 +49,7 @@ impl OperatorType {
             '<' => Some(OperatorType::Less),
             '>' => Some(OperatorType::Greater),
             '&' => Some(OperatorType::Ampersand),
+            '%' => Some(OperatorType::Percent),
             _ => None,
         }
     }
@@ -57,6 +63,7 @@ pub enum Keyword {
     Fn,
     If,
     While,
+    Extern,
     Void,
     RawPtr,
     Int8,
@@ -77,6 +84,7 @@ impl Keyword {
             "fn" => Some(Keyword::Fn),
             "if" => Some(Keyword::If),
             "while" => Some(Keyword::While),
+            "extern" => Some(Keyword::Extern),
             "i8" => Some(Keyword::Int8),
             "i16" => Some(Keyword::Int16),
             "i32" => Some(Keyword::Int32),
@@ -94,6 +102,7 @@ pub enum TokenType {
     Number(u64),
     Operator(OperatorType),
     Keyword(Keyword),
+    String(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

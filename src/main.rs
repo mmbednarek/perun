@@ -19,6 +19,9 @@ use ast::GlobalStatementNode;
 mod parser;
 use parser::Parser;
 
+#[macro_use]
+mod typing;
+
 mod ilgen;
 use ilgen::IlGenerator;
 
@@ -26,8 +29,6 @@ mod symbols;
 use symbols::{SymbolTable, SymbolPath};
 
 mod address_table;
-
-mod typing;
 
 fn main() -> std::io::Result<()> {
     let file_handle = File::open("file.txt")?;
@@ -56,7 +57,7 @@ fn main() -> std::io::Result<()> {
     }
 
     let parsed = parsed_res.unwrap();
-    println!("Parsed {:?}", parsed);
+    // println!("Parsed {:?}", parsed);
 
 
     let path = SymbolPath::new();
@@ -73,13 +74,11 @@ fn main() -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
     }
 
-    generator.print_module();
+    // generator.print_module();
 
-    for i in 0..20 {
-        println!("Fib number {}: {}", i, generator.run(i));
-    }
+    generator.run();
 
-    sym_table.print_symbols();
+    // sym_table.print_symbols();
 
     Ok(())
 }

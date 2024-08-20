@@ -17,6 +17,8 @@ enum LexState {
     Global,
     PreComment,
     CommentSingleLine,
+    String,
+    StringEscape,
 }
 
 pub struct Lexer {
@@ -97,6 +99,44 @@ impl Lexer {
                     self.state = LexState::Global;
                 }
             },
+            LexState::String => {
+                match ch {
+                    '"' => {
+                        self.state = LexState::Global;
+                        let str_token = TokenType::String(take(&mut self.current_token));
+                        self.push_token(str_token);
+                    },
+                    '\\' => {
+                        self.state = LexState::StringEscape;
+                    },
+                    _ => {
+                        self.current_token.push(ch);
+                    },
+                }
+            },
+            LexState::StringEscape => {
+                match ch {
+                    'n' => {
+                        self.current_token.push('\n');
+                    },
+                    '\\' => {
+                        self.current_token.push('\\');
+                    },
+                    'r' => {
+                        self.current_token.push('\r');
+                    },
+                    't' => {
+                        self.current_token.push('\t');
+                    },
+                    '"' => {
+                        self.current_token.push('\"');
+                    },
+                    _ => {
+                        self.current_token.push(ch);
+                    },
+                };
+                self.state = LexState::String;
+            },
             LexState::Global => {
                 if is_wide_space(ch) {
                     self.handle_identifier();
@@ -106,6 +146,12 @@ impl Lexer {
                 if ch == '/' {
                     self.handle_identifier();
                     self.state = LexState::PreComment;
+                    return
+                }
+
+                if ch == '"' {
+                    self.handle_identifier();
+                    self.state = LexState::String;
                     return
                 }
 

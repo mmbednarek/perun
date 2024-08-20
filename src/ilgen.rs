@@ -3,15 +3,15 @@ use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::types::AnyTypeEnum;
-use inkwell::values::{PointerValue, BasicValueEnum, BasicValue};
+use inkwell::values::{PointerValue, BasicValueEnum, BasicValue, IntValue};
 use inkwell::OptimizationLevel;
 use crate::token::Location;
 use crate::symbols::{SymbolTable, SymbolInfo, SymbolPath};
 use crate::address_table::AddressTable;
 use crate::typing::Type;
-use crate::error::{CompilerResult, CompilerError, wrap_option, wrap_err, err_with_location};
+use crate::error::{CompilerResult, wrap_option, wrap_err, err_with_location};
 
-type FibFunc = unsafe extern "C" fn(u64) -> u64;
+type MainFunc = unsafe extern "C" fn() -> i32;
 
 pub struct IlGenerator<'ctx, 'st> {
     pub context: &'ctx Context,
@@ -42,29 +42,33 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
         self.module.print_to_stderr();
     }
 
-    pub fn run(&mut self, n: u64) -> u64 {
-        unsafe{ self.exe.get_function::<FibFunc>("fib").unwrap().call(n) }
+    pub fn run(&mut self) -> i32 {
+        unsafe{ self.exe.get_function::<MainFunc>("main").unwrap().call() }
     }
 
     pub fn load_var(&self, location: Location, var_type: &Type, ptr: &PointerValue<'ctx>, name: &str) -> CompilerResult<BasicValueEnum<'ctx>> {
-        let llvm_type = wrap_option(location, var_type.to_llvm_type(self.context), "failed to map llvm type A")?;
-
-        match llvm_type {
-            AnyTypeEnum::PointerType(pt) => wrap_err(location, self.builder.build_load(pt, *ptr, name)),
-            AnyTypeEnum::IntType(it) => wrap_err(location, self.builder.build_load(it, *ptr, name)),
-            AnyTypeEnum::FloatType(ft) => wrap_err(location, self.builder.build_load(ft, *ptr, name)),
-            _ => { Err(CompilerError{location, message: format!("failed to map to llvm type: {:?}", *var_type)}) },
-        }
+        visit_type!(location, self.context, var_type, value, self.builder.build_load(value, *ptr, name))
     }
 
     pub fn alloc_var(&self, location: Location, var_type: &Type, name: &str) -> CompilerResult<PointerValue<'ctx>> {
-        let llvm_type = wrap_option(location, var_type.to_llvm_type(self.context), "failed to map llvm type C")?;
+        visit_type!(location, self.context, var_type, value, self.builder.build_alloca(value, name))
+    }
 
-        match llvm_type {
-            AnyTypeEnum::PointerType(pt) => wrap_err(location, self.builder.build_alloca(pt, name)),
-            AnyTypeEnum::IntType(it) => wrap_err(location, self.builder.build_alloca(it, name)),
-            AnyTypeEnum::FloatType(ft) => wrap_err(location, self.builder.build_alloca(ft, name)),
-            _ => { Err(CompilerError{location, message: "failed to map to llvm type D".to_string()}) },
+    pub fn build_get_element_ptr(&self, location: Location, ptr_type: &Type, ptr: PointerValue<'ctx>, index: IntValue<'ctx>, name: &str) -> CompilerResult<PointerValue<'ctx>> {
+        visit_type!(location, self.context, ptr_type, value, unsafe{ self.builder.build_gep(value, ptr, &[index], name) })
+    }
+
+    pub fn build_sext(&self, location: Location, target_type: &Type, int_value: IntValue<'ctx>, name: &str) -> CompilerResult<IntValue<'ctx>> {
+        match wrap_option(location, target_type.to_llvm_type(self.context), "failed to map llvm type")? {
+            AnyTypeEnum::IntType(int_type) => wrap_err(location, self.builder.build_int_s_extend(int_value, int_type, name)),
+            _ => { Err(crate::error::CompilerError{location, message: format!("expected an int type, got: {:?}", target_type)}) },
+        }
+    }
+
+    pub fn build_trunc(&self, location: Location, target_type: &Type, int_value: IntValue<'ctx>, name: &str) -> CompilerResult<IntValue<'ctx>> {
+        match wrap_option(location, target_type.to_llvm_type(self.context), "failed to map llvm type")? {
+            AnyTypeEnum::IntType(int_type) => wrap_err(location, self.builder.build_int_truncate(int_value, int_type, name)),
+            _ => { Err(crate::error::CompilerError{location, message: format!("expected an int type, got: {:?}", target_type)}) },
         }
     }
 

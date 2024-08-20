@@ -1,7 +1,70 @@
+extern fn write(fd: i32, buff: rawptr, count: i64): i64;
+extern fn read(fd: i32, buff: rawptr, count: i64): i64;
+extern fn fsync(fd: i32): i32;
+extern fn malloc(size: i64): rawptr;
+extern fn free(ptr: rawptr);
+extern fn strlen(str: rawptr): i64;
+extern fn atoi(str: rawptr): i32;
 
-fn fib_impl(init_a: i32, init_b: i32, n: i32): i32 {
-  var a = init_a;
-  var b = init_b;
+fn int_log10(in_value: i32): i32 {
+  var x = in_value;
+  var count = 0;
+
+  while 0 < x {
+    x = x / 10;
+    count = count + 1;
+  }
+
+  return count;
+}
+
+fn cast_int_to_string(in_value: i32): rawptr {
+  var x = in_value;
+
+  var length = int_log10(in_value);
+  var buff = malloc(length + 1);
+  var index = length - 1;
+  var rem = 0;
+
+  buff[length] = i8(0);
+
+  while 0 < x {
+    rem = x % 10;
+    buff[index] = i8(48 + rem);
+    x = x / 10;
+    index = index - 1;
+  }
+
+  return buff;
+}
+
+fn print(msg: rawptr): i32 {
+  write(1, msg, strlen(msg));
+  fsync(1);
+  return 0;
+}
+
+fn print_int(in_value: i32): i32 {
+  var str = cast_int_to_string(in_value);
+  print(str);
+  free(str);
+  return 0;
+}
+
+fn read_int(): i32 {
+  var buff = malloc(128);
+  var num: i32 = 0;
+
+  read(0, buff, 128);
+  num = atoi(buff);
+  free(buff);
+
+  return num;
+}
+
+fn fib(n: i32): i32 {
+  var a = 1;
+  var b = 1;
   var tmp = 0;
   var index = 0;
 
@@ -9,18 +72,18 @@ fn fib_impl(init_a: i32, init_b: i32, n: i32): i32 {
     tmp = a + b;
     a = b;
     b = tmp;
+    print_int(b);
+    print("\n");
     index = index + 1;
   }
 
   return b;
 }
 
-fn fib(n: i32): i32 {
-  var value = 5;
-  var value_ptr = &value;
-  *value_ptr = n;
+fn main(): i32 {
+  print("Example application written in PERUN\n");
+  print("Input number of fibbonacci number to generate: ");
+  fib(read_int());
 
-  // print("hello");
-
-  return fib_impl(1, 1, value);
+  return 0;
 }

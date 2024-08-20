@@ -62,6 +62,61 @@ impl Type {
             _ => false,
         }
     }
+
+    pub fn is_float_type(&self) -> bool {
+        match self {
+            Type::Float32 => true,
+            Type::Float64 => true,
+            _ => false,
+        }
+    }
+
+    pub fn byte_count(&self) -> Option<i32> {
+        match self {
+            Type::Int8 => Some(1),
+            Type::Int16 => Some(2),
+            Type::Int32 => Some(4),
+            Type::Int64 => Some(8),
+            Type::Float32 => Some(4),
+            Type::Float64 => Some(8),
+            _ => None,
+        }
+    }
+
+    pub fn is_void(&self) -> bool {
+        match self {
+            Type::Void => true,
+            _ => false,
+        }
+    }
+
+    pub fn wider_type(&self, other: &Type) -> Type {
+        if self.is_int_type() {
+            if other.is_int_type() {
+                if self.byte_count().unwrap_or(0) >= other.byte_count().unwrap_or(0) {
+                    self.clone()
+                } else {
+                    other.clone()
+                }
+            } else {
+                other.clone()
+            }
+        } else {
+            self.clone()
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! visit_type {
+    ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
+        match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
+            AnyTypeEnum::PointerType($y) => wrap_err($loc, $z),
+            AnyTypeEnum::IntType($y) => wrap_err($loc, $z),
+            AnyTypeEnum::FloatType($y) => wrap_err($loc, $z),
+            _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
+        }
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

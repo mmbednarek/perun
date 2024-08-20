@@ -1,6 +1,6 @@
 use crate::token_reader::TokenReader;
 use crate::token::{TokenType, OperatorType, Location, Keyword};
-use crate::error::CompilerResult;
+use crate::error::{CompilerResult, wrap_option};
 use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
@@ -116,9 +116,16 @@ impl<'a> Parser<'a> {
             let token = self.reader.next()?;
             let location = token.location;
             if let TokenType::Keyword(kw) = &token.token_type {
-                if *kw == Keyword::Fn {
-                    let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function(location)?);
-                    result.body.push(func);
+                match kw {
+                    Keyword::Fn => {
+                        let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function(location)?);
+                        result.body.push(func);
+                    },
+                    Keyword::Extern => {
+                        let extern_func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_extern(location)?);
+                        result.body.push(extern_func);
+                    },
+                    _ => compiler_err!(location, "unexpected token: {:?}", kw),
                 }
             }
 
@@ -168,6 +175,49 @@ impl<'a> Parser<'a> {
         let scope = self.parse_scope("entry")?;
 
         Ok(FunctionNode::<'a, 'a>{location, name, params, scope, ret_type})
+    }
+
+    fn parse_extern(&mut self, location: Location) -> CompilerResult<ExternFunctionNode> {
+        self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
+
+        let name = self.reader.expect_identifier()?;
+        self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
+
+        let mut params: Vec<FunctionArg> = Vec::new();
+
+        let peeked_paren = self.reader.peek()?;
+        if peeked_paren.token_type != TokenType::Operator(OperatorType::RightParen) {
+            loop {
+                let arg_name = self.reader.expect_identifier()?;
+                self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
+                let arg_type = self.parse_type()?;
+                params.push(FunctionArg{name: arg_name, arg_type});
+                
+
+                let following = self.reader.next()?;
+                if following.token_type == TokenType::Operator(OperatorType::RightParen) {
+                    break
+                }
+            }
+        } else {
+            self.reader.next()?;
+        }
+
+        let mut ret_type = Type::Void;
+
+        let token = self.reader.next()?;
+        match token.token_type {
+            TokenType::Operator(OperatorType::Colon) => {
+                ret_type = self.parse_type()?;
+                self.reader.expect_token(TokenType::Operator(OperatorType::Semicolon))?;
+            },
+            TokenType::Operator(OperatorType::Semicolon) => {},
+            _ => {
+                compiler_err!(token.location, "invalid token {:?}", token.token_type);
+            }
+        }
+
+        Ok(ExternFunctionNode{location, name, params, ret_type})
     }
 
     fn parse_type(&mut self) -> CompilerResult<Type> {
@@ -242,13 +292,13 @@ impl<'a> Parser<'a> {
 
     fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode<'a, 'a>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
-        let scope = self.parse_scope("iftrue")?;
+        let scope = self.parse_scope("if.body")?;
         Ok(IfNode{location, condition: expr, iftrue_scope: scope})
     }
 
     fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode<'a, 'a>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
-        let scope = self.parse_scope("iftrue")?;
+        let scope = self.parse_scope("while.body")?;
         Ok(WhileNode{location, condition: expr, scope})
     }
 
@@ -287,12 +337,22 @@ impl<'a> Parser<'a> {
                         self.reader.next()?;
                         let call = self.parse_function_call(peeked.location, value.as_ref())?;
                         builder.push_expr(call);
+                    } else if peeked.token_type == TokenType::Operator(OperatorType::LeftSquare) {
+                        self.reader.next()?;
+                        let expr = self.parse_expression(OperatorType::RightSquare)?;
+                        builder.push_expr(GetElementNode{location: token.location, object: Box::new(IdentifierNode{location: token.location, name: value.to_string()}), index: expr});
                     } else {
                         builder.push_expr(IdentifierNode{location: token.location, name: value.to_string()});
                     }
                 },
                 TokenType::Keyword(kw) => {
-                    compiler_err!(token.location, "unexpected keyword {:?}", kw)
+                    let cast_type = wrap_option(token.location, Type::from_keyword(kw), "unexpected keyword")?;
+                    self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
+                    let expr = self.parse_expression(OperatorType::RightParen)?;
+                    builder.push_expr(CastNode{location: token.location, target_type: cast_type, expr});
+                },
+                TokenType::String(str) => {
+                    builder.push_expr(StringNode{location: token.location, value: str.to_string()});
                 },
             }
         }
@@ -305,6 +365,7 @@ impl<'a> Parser<'a> {
 
         let peek = self.reader.peek()?;
         if peek.token_type == TokenType::Operator(OperatorType::RightParen) {
+            self.reader.next()?;
             return Ok(FunctionCall{location, name: name.to_string(), args});
         }
 

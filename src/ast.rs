@@ -4,6 +4,7 @@ use crate::error::{CompilerResult, wrap_option, wrap_err, err_with_location};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, FuncType, ValueType};
 
+use inkwell::module::Linkage;
 use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum};
 use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, PointerValue, BasicMetadataValueEnum};
 use inkwell::basic_block::BasicBlock;
@@ -18,6 +19,7 @@ pub enum BinaryOperation {
     Divide,
     Less,
     Assign,
+    Modulo,
 }
 
 impl BinaryOperation {
@@ -29,6 +31,7 @@ impl BinaryOperation {
             OperatorType::Slash => Some(BinaryOperation::Divide),
             OperatorType::Less => Some(BinaryOperation::Less),
             OperatorType::Equals => Some(BinaryOperation::Assign),
+            OperatorType::Percent => Some(BinaryOperation::Modulo),
             _ => None
         }
     }
@@ -39,6 +42,7 @@ impl BinaryOperation {
             BinaryOperation::Subtract => 3,
             BinaryOperation::Divide => 4,
             BinaryOperation::Multiply => 4,
+            BinaryOperation::Modulo => 4,
             BinaryOperation::Less => 2,
             BinaryOperation::Assign => 1,
         }
@@ -80,6 +84,9 @@ impl BinaryOperation {
                 },
                 BinaryOperation::Less => {
                     return Ok(Box::new(wrap_err(*location, gen.builder.build_int_compare(IntPredicate::SLT, lhs_int, rhs_int, "less"))?));
+                },
+                BinaryOperation::Modulo => {
+                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_signed_rem(lhs_int, rhs_int, "mod"))?));
                 },
                 _ => {
                     compiler_err!(*location, "invalid operation");
@@ -257,6 +264,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
             AnyTypeEnum::PointerType(pt) => pt.fn_type(&args[..], false),
             AnyTypeEnum::IntType(it) => it.fn_type(&args[..], false),
             AnyTypeEnum::FloatType(ft) => ft.fn_type(&args[..], false),
+            AnyTypeEnum::VoidType(ft) => ft.fn_type(&args[..], false),
             _ => { compiler_err!(self.location, "failed to map llvm type") },
         };
 
@@ -279,6 +287,53 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
         symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()}))});
 
         self.scope.collect_symbols(&subpath, symtable)
+    }
+}
+
+#[derive(Debug)]
+pub struct ExternFunctionNode {
+    pub location: Location,
+    pub name: String,
+    pub params: Vec<FunctionArg>,
+    pub ret_type: Type,
+}
+
+impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ExternFunctionNode {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath) -> CompilerResult<()> {
+        let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
+        for param in &self.params {
+            let llvm_type = wrap_option(self.location, param.arg_type.to_llvm_type(gen.context), "unable to map llvm type")?;
+            match llvm_type {
+                AnyTypeEnum::PointerType(pt) => args.push(pt.into()),
+                AnyTypeEnum::IntType(it) => args.push(it.into()),
+                AnyTypeEnum::FloatType(ft) => args.push(ft.into()),
+                _ => { compiler_err!(self.location, "failed to map llvm type") },
+            }
+        }
+
+        let llvm_ret_type = wrap_option(self.location, self.ret_type.to_llvm_type(gen.context), "unable to map llvm type")?;
+        let fn_type = match llvm_ret_type {
+            AnyTypeEnum::PointerType(pt) => pt.fn_type(&args[..], false),
+            AnyTypeEnum::IntType(it) => it.fn_type(&args[..], false),
+            AnyTypeEnum::FloatType(ft) => ft.fn_type(&args[..], false),
+            AnyTypeEnum::VoidType(ft) => ft.fn_type(&args[..], false),
+            _ => { compiler_err!(self.location, "failed to map llvm type") },
+        };
+
+        let function = gen.module.add_function(&self.name, fn_type, Some(Linkage::External));
+        gen.addrtable.register_func(path.sub(&self.name), function);
+        Ok(())
+    }
+
+    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
+        let mut types = Vec::<Type>::new();
+        let subpath = path.sub(&self.name);
+        for (i, param) in self.params.iter().enumerate() {
+            types.push(param.arg_type.clone());
+            symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone()});
+        }
+        symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()}))});
+        Ok(())
     }
 }
 
@@ -398,7 +453,7 @@ pub struct WhileNode<'ctx, 'st> {
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()>{
-        let prewhile = gen.context.append_basic_block(*function, "prewhile");
+        let prewhile = gen.context.append_basic_block(*function, "while.cond");
         wrap_err(self.location, gen.builder.build_unconditional_branch(prewhile))?;
         gen.builder.position_at_end(prewhile);
 
@@ -407,7 +462,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
         let cond_int = basic_value_to_int(self.location, cond.as_ref())?;
 
         let scope = self.scope.generate_il(gen, &path.sub("while"), function)?;
-        let postwhile = gen.context.append_basic_block(*function, "postwhile");
+        let postwhile = gen.context.append_basic_block(*function, "while.end");
 
         gen.builder.position_at_end(prewhile);
         wrap_err(self.location, gen.builder.build_conditional_branch(cond_int, scope, postwhile))?;
@@ -455,7 +510,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
         let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
         match symbol.sym_type {
             SymbolType::FunctionArg(index) => {
-                Ok(Box::new(wrap_option(self.location, function.get_nth_param(index as u32), "invalid function argument")?.into_int_value()))
+                Ok(Box::new(wrap_option(self.location, function.get_nth_param(index as u32), "invalid function argument")?))
             }
             SymbolType::LocalVariable => {
                 let (sym, ptr) = gen.find_symbol_with_addr(self.location, path, self.name.as_ref())?;
@@ -501,13 +556,46 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
     }
 
     fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
-        if expected_type.is_int_type() { Ok(expected_type.clone()) } else {
+        if expected_type.is_int_type() {
+            Ok(expected_type.clone())
+        } else {
             if u32::try_from(self.number).is_ok() {
                 Ok(Type::Int32)
             } else {
                 Ok(Type::Int64)
             }
         }
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct StringNode {
+    pub location: Location,
+    pub value: String,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for StringNode {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, _: &SymbolPath, _function: &FunctionValue<'ctx>, _: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+        if *value_type == ValueType::LValue {
+            compiler_err!(self.location, "tried to interpret a string as an l-value");
+        }
+
+        let arr = gen.context.i8_type().array_type(self.value.len() as u32);
+        let global_val = gen.module.add_global(arr, None, "str");
+        global_val.set_constant(true);
+
+        let str_val = gen.context.const_string(self.value.as_bytes(), true);
+        global_val.set_initializer(&str_val);
+
+        Ok(Box::new(global_val.as_pointer_value()))
+    }
+
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        Ok(Type::RawPtr)
     }
 
     fn get_location(&self) -> &Location {
@@ -530,8 +618,19 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
         }
 
         // For assigment we always expect the left hand side to be an l-value.
-        let left_value_type = if self.operation == BinaryOperation::Assign { &ValueType::LValue } else { &ValueType::RValue };
-        let deduced_type = self.right.deduce_type(gen.symtable, path, expected_type)?;
+
+        let left_deduced_type = self.left.deduce_type(gen.symtable, path, expected_type)?;
+        let right_deduced_type = self.right.deduce_type(gen.symtable, path, expected_type)?;
+
+        let (left_value_type, deduced_type) = if self.operation == BinaryOperation::Assign {
+            if left_deduced_type.is_void() {
+                (&ValueType::LValue, right_deduced_type)
+            } else {
+                (&ValueType::LValue, left_deduced_type)
+            }
+        } else {
+            (&ValueType::RValue, left_deduced_type.wider_type(&right_deduced_type))
+        };
 
         let left = self.left.generate_il(gen, path, function, &deduced_type, left_value_type)?;
         let right = self.right.generate_il(gen, path, function, &deduced_type, &ValueType::RValue)?;
@@ -633,7 +732,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
             if let Either::Left(call_res_bv) = res {
                 Ok(Box::new(call_res_bv))
             } else {
-                compiler_err!(self.location, "call result is not a basic value");
+                Ok(gen.null_ptr())
             }
         } else {
             compiler_err!(self.location, "tried to call an object that's not a function");
@@ -647,6 +746,74 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
         }
 
         compiler_err!(self.location, "tried to call an object that's not a function");
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct GetElementNode<'ctx, 'st> {
+    pub location: Location,
+    pub object: ExpressionBox<'ctx, 'st>,
+    pub index: ExpressionBox<'ctx, 'st>,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetElementNode<'ctx, 'st> {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+        let obj_value = self.object.generate_il(gen, path, function, &Type::RawPtr, &ValueType::RValue)?;
+        let obj_ptr = basic_value_to_ptr(self.location, obj_value.as_ref())?;
+        let index_value = self.index.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
+        let index = basic_value_to_int(self.location, index_value.as_ref())?;
+
+        let indexed_ptr = gen.build_get_element_ptr(self.location, expected_type, obj_ptr, index, "addrindex")?;
+        match value_type {
+            ValueType::LValue => Ok(Box::new(indexed_ptr)),
+            ValueType::RValue => Ok(Box::new(gen.load_var(self.location, expected_type, &indexed_ptr, "addrvalue")?)),
+            ValueType::None => Ok(gen.null_ptr()),
+        }
+    }
+
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
+        Ok(expected_type.clone())
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct CastNode<'ctx, 'st> {
+    pub location: Location,
+    pub target_type: Type,
+    pub expr: ExpressionBox<'ctx, 'st>,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for CastNode<'ctx, 'st> {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+        if *value_type == ValueType::LValue {
+            compiler_err!(self.location, "expression is not R-value");
+        }
+
+        let source_type = self.expr.deduce_type(&gen.symtable, path, expected_type)?;
+        if !self.target_type.is_int_type() || !source_type.is_int_type() {
+            compiler_err!(self.location, "only int cast is supported");
+        }
+
+        let expr = self.expr.generate_il(gen, path, function, &source_type, &ValueType::RValue)?;
+        let int_value = basic_value_to_int(self.location, expr.as_ref())?;
+
+        if self.target_type.byte_count() > source_type.byte_count() {
+            Ok(Box::new(gen.build_sext(self.location, &self.target_type, int_value, "intsext")?))
+        } else {
+            Ok(Box::new(gen.build_trunc(self.location, &self.target_type, int_value, "inttrunc")?))
+        }
+    }
+
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        Ok(self.target_type.clone())
     }
 
     fn get_location(&self) -> &Location {
