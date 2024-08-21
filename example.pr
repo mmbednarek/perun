@@ -6,7 +6,7 @@ extern fn free(ptr: rawptr);
 extern fn strlen(str: rawptr): i64;
 extern fn atoi(str: rawptr): i32;
 
-fn int_log10(in_value: i32): i32 {
+fn int_log10(in_value: i32) : i32 {
   var x = in_value;
   var count = 0;
 
@@ -18,7 +18,7 @@ fn int_log10(in_value: i32): i32 {
   return count;
 }
 
-fn cast_int_to_string(in_value: i32): rawptr {
+fn cast_int_to_string(in_value: i32) : rawptr {
   var x = in_value;
 
   var length = int_log10(in_value);
@@ -38,20 +38,18 @@ fn cast_int_to_string(in_value: i32): rawptr {
   return buff;
 }
 
-fn print(msg: rawptr): i32 {
+fn print(msg: rawptr) {
   write(1, msg, strlen(msg));
   fsync(1);
-  return 0;
 }
 
-fn print_int(in_value: i32): i32 {
+fn print_int(in_value: i32) {
   var str = cast_int_to_string(in_value);
   print(str);
   free(str);
-  return 0;
 }
 
-fn read_int(): i32 {
+fn read_int() : i32 {
   var buff = malloc(128);
   var num: i32 = 0;
 
@@ -62,7 +60,7 @@ fn read_int(): i32 {
   return num;
 }
 
-fn fib(n: i32): i32 {
+fn fib(n: i32) {
   var a = 1;
   var b = 1;
   var tmp = 0;
@@ -76,11 +74,9 @@ fn fib(n: i32): i32 {
     print("\n");
     index = index + 1;
   }
-
-  return b;
 }
 
-fn main(): i32 {
+fn main() : i32 {
   print("Example application written in PERUN\n");
   print("Input number of fibbonacci number to generate: ");
   fib(read_int());

@@ -5,24 +5,25 @@ use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
 
-struct ExpressionBuilder<'a> {
-    expr_stack: Vec<Option<Box<dyn ExpressionNode<'a, 'a> + 'a>>>,
+struct ExpressionBuilder<'ctx, 'st>
+    where 'st: 'ctx {
+    expr_stack: Vec<Option<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>>>,
     op_stack: Vec<AnyOperation>,
     last_is_op: bool,
     location: Location,
 }
 
-impl<'a> ExpressionBuilder<'a> {
+impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
     fn new(location: Location) -> Self {
         Self{expr_stack: Vec::new(), op_stack: Vec::new(), last_is_op: true, location}
     }
 
-    fn push_expr<T: ExpressionNode<'a, 'a> + 'a>(&mut self, node: T) {
+    fn push_expr<T: ExpressionNode<'ctx, 'st> + 'ctx>(&mut self, node: T) {
         self.expr_stack.push(Some(Box::new(node)));
         self.last_is_op = false;
     }
 
-    fn push_expr_box(&mut self, node: Box<dyn ExpressionNode<'a, 'a> + 'a>) {
+    fn push_expr_box(&mut self, node: Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>) {
         self.expr_stack.push(Some(node));
         self.last_is_op = false;
     }
@@ -83,7 +84,7 @@ impl<'a> ExpressionBuilder<'a> {
         Ok(())
     }
 
-    fn build(&mut self) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
+    fn build(&mut self) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
         while !self.op_stack.is_empty() {
             self.process_operator();
         }
@@ -100,17 +101,18 @@ impl<'a> ExpressionBuilder<'a> {
     }
 }
 
-pub struct Parser<'a> {
-    reader: &'a mut TokenReader<'a>,
+pub struct Parser<'tkn> {
+    reader: &'tkn mut TokenReader<'tkn>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(reader: &'a mut TokenReader<'a>) -> Parser {
+impl<'tkn, 'ctx, 'st> Parser<'tkn> 
+where 'st: 'ctx {
+    pub fn new(reader: &'tkn mut TokenReader<'tkn>) -> Parser {
         Self{reader}
     }
 
-    pub fn parse(&mut self) -> CompilerResult<SourceUnit<'a, 'a>> {
-        let mut result = SourceUnit::<'a, 'a>{body: Vec::new()};
+    pub fn parse(&mut self) -> CompilerResult<SourceUnit<'ctx, 'st>> {
+        let mut result = SourceUnit{body: Vec::new()};
 
         while self.reader.has_tokens() {
             let token = self.reader.next()?;
@@ -118,11 +120,11 @@ impl<'a> Parser<'a> {
             if let TokenType::Keyword(kw) = &token.token_type {
                 match kw {
                     Keyword::Fn => {
-                        let func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_function(location)?);
+                        let func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location)?);
                         result.body.push(func);
                     },
                     Keyword::Extern => {
-                        let extern_func: Box<dyn GlobalStatementNode<'a, 'a>> = Box::new(self.parse_extern(location)?);
+                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_extern(location)?);
                         result.body.push(extern_func);
                     },
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
@@ -134,7 +136,7 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    fn parse_function(&mut self, location: Location) -> CompilerResult<FunctionNode<'a, 'a>> {
+    fn parse_function(&mut self, location: Location) -> CompilerResult<FunctionNode<'ctx, 'st>> {
         let name = self.reader.expect_identifier()?;
         self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
 
@@ -172,9 +174,27 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let scope = self.parse_scope("entry")?;
+        let mut scope = self.parse_scope("entry")?;
 
-        Ok(FunctionNode::<'a, 'a>{location, name, params, scope, ret_type})
+        let is_last_stmt_ret = match scope.body.last() {
+            Some(stmt) => {
+                match stmt.to_any_statement_node() {
+                    AnyStatementNode::ReturnNode(_) => true,
+                    _ => false,
+                }
+            },
+            None => false,
+        };
+
+        if !is_last_stmt_ret {
+            if ret_type != Type::Void {
+                compiler_err!(location, "missing return at the end of function");
+            }
+
+            scope.body.push(Box::new(ReturnNode{location, expression: None}));
+        }
+
+        Ok(FunctionNode{location, name, params, scope, ret_type})
     }
 
     fn parse_extern(&mut self, location: Location) -> CompilerResult<ExternFunctionNode> {
@@ -229,8 +249,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_scope(&mut self, name: &str) -> CompilerResult<ScopeNode<'a, 'a>> {
-        let mut scope = ScopeNode::<'a, 'a>{body: Vec::new(), name: name.to_string()};
+    fn parse_scope(&mut self, name: &str) -> CompilerResult<ScopeNode<'ctx, 'st>> {
+        let mut scope = ScopeNode::<'ctx, 'st>{body: Vec::new(), name: name.to_string()};
 
         let peeked_brace = self.reader.peek()?;
         if peeked_brace.token_type == TokenType::Operator(OperatorType::RightBrace) {
@@ -250,14 +270,20 @@ impl<'a> Parser<'a> {
         Ok(scope)
     }
 
-    fn parse_statement(&mut self) -> CompilerResult<Box<dyn StatementNode<'a, 'a> + 'a>> {
+    fn parse_statement(&mut self) -> CompilerResult<Box<dyn StatementNode<'ctx, 'st> + 'ctx>> {
         let token = self.reader.next()?;
         let location = token.location;
         if let TokenType::Keyword(kw) = &token.token_type {
             match kw {
                 Keyword::Return => {
-                    let expression = self.parse_expression(OperatorType::Semicolon)?;
-                    return Ok(Box::new(ReturnNode::<'a, 'a>{location, expression}));
+                    let peek = self.reader.peek()?;
+                    if peek.token_type == TokenType::Operator(OperatorType::Semicolon) {
+                        self.reader.next()?;
+                        return Ok(Box::new(ReturnNode{location, expression: None}));
+                    } else {
+                        let expression = self.parse_expression(OperatorType::Semicolon)?;
+                        return Ok(Box::new(ReturnNode{location, expression: Some(expression)}));
+                    }
                 },
                 Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
@@ -272,7 +298,7 @@ impl<'a> Parser<'a> {
                     }
 
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
-                    return Ok(Box::new(VarDeclNode::<'a, 'a>{location, name, expression, var_type}));
+                    return Ok(Box::new(VarDeclNode{location, name, expression, var_type}));
                 },
                 Keyword::If => {
                     return Ok(Box::new(self.parse_if_statement(location)?));
@@ -290,23 +316,23 @@ impl<'a> Parser<'a> {
         Ok(Box::new(ExpressionStatementNode{expression: expr}))
     }
 
-    fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode<'a, 'a>> {
+    fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode<'ctx, 'st>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
         let scope = self.parse_scope("if.body")?;
         Ok(IfNode{location, condition: expr, iftrue_scope: scope})
     }
 
-    fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode<'a, 'a>> {
+    fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode<'ctx, 'st>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
         let scope = self.parse_scope("while.body")?;
         Ok(WhileNode{location, condition: expr, scope})
     }
 
-    fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
+    fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
         self.parse_expression_until_one_of(&[stop_op])
     }
 
-    fn parse_expression_until_one_of(&mut self, stop_ops: &[OperatorType]) -> CompilerResult<Box<dyn ExpressionNode<'a, 'a> + 'a>> {
+    fn parse_expression_until_one_of(&mut self, stop_ops: &[OperatorType]) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
         let peek = self.reader.peek();
         let token_start_loc = match peek {
             Ok(tkn) => tkn.location,
@@ -360,7 +386,7 @@ impl<'a> Parser<'a> {
         return builder.build();
     }
 
-    fn parse_function_call(&mut self, location: Location, name: &str) -> CompilerResult<FunctionCall<'a, 'a>> {
+    fn parse_function_call(&mut self, location: Location, name: &str) -> CompilerResult<FunctionCall<'ctx, 'st>> {
         let mut args = Vec::new();
 
         let peek = self.reader.peek()?;

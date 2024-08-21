@@ -8,7 +8,7 @@ use inkwell::module::Linkage;
 use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum};
 use inkwell::values::{FunctionValue, BasicValue, BasicValueEnum, IntValue, PointerValue, BasicMetadataValueEnum};
 use inkwell::basic_block::BasicBlock;
-use inkwell::{AddressSpace, IntPredicate};
+use inkwell::IntPredicate;
 use either::Either;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -170,12 +170,22 @@ pub trait GlobalStatementNode<'ctx, 'st> : std::fmt::Debug {
 pub trait StatementNode<'ctx, 'st> : std::fmt::Debug {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()>;
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()>;
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st>;
 }
 
 pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>>;
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type>;
     fn get_location(&self) -> &Location;
+}
+
+#[derive(Debug)]
+pub enum AnyStatementNode<'stmt, 'ctx, 'st> {
+    ReturnNode(&'stmt ReturnNode<'ctx, 'st>),
+    VarDeclNode(&'stmt VarDeclNode<'ctx, 'st>),
+    IfNode(&'stmt IfNode<'ctx, 'st>),
+    WhileNode(&'stmt WhileNode<'ctx, 'st>),
+    ExpressionStatementNode(&'stmt ExpressionStatementNode<'ctx, 'st>),
 }
 
 type ExpressionBox<'ctx, 'st> = Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>;
@@ -344,7 +354,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ExternFunctionNode {
 #[derive(Debug)]
 pub struct ReturnNode<'ctx, 'st> {
     pub location: Location,
-    pub expression: ExpressionBox<'ctx, 'st>,
+    pub expression: Option<ExpressionBox<'ctx, 'st>>,
 }
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for ReturnNode<'ctx, 'st> {
@@ -352,8 +362,15 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for ReturnNode<'ctx, 'st> {
         let msg = format!("unable to find function type {}", path);
         let func_symbol = wrap_option(self.location, gen.symtable.find_by_path(path), msg.as_ref())?;
         if let Type::Function(func_type) = &func_symbol.data_type {
-            let value = self.expression.generate_il(gen, path, function, &func_type.ret_type, &ValueType::RValue)?;
-            wrap_err(self.location, gen.builder.build_return(Some(value.as_ref())))?;
+            match &self.expression {
+                Some(expr) => {
+                    let value = expr.generate_il(gen, path, function, &func_type.ret_type, &ValueType::RValue)?;
+                    wrap_err(self.location, gen.builder.build_return(Some(value.as_ref())))?;
+                },
+                None => {
+                    wrap_err(self.location, gen.builder.build_return(None))?;
+                }
+            }
             return Ok(());
         }
 
@@ -361,6 +378,10 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for ReturnNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, _path: &SymbolPath, _symtable: &mut SymbolTable) -> CompilerResult<()> { Ok(()) }
+
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st> {
+        AnyStatementNode::ReturnNode(self)
+    }
 }
 
 #[derive(Debug)]
@@ -408,6 +429,10 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
         symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::LocalVariable, data_type: var_type});
         Ok(())
     }
+
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st> {
+        AnyStatementNode::VarDeclNode(self)
+    }
 }
 
 #[derive(Debug)]
@@ -441,6 +466,10 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         self.iftrue_scope.collect_symbols(&path.sub("if"), symtable);
         Ok(())
+    }
+
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st> {
+        AnyStatementNode::IfNode(self)
     }
 }
 
@@ -479,6 +508,10 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
         self.scope.collect_symbols(&path.sub("while"), symtable);
         Ok(())
     }
+
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st> {
+        AnyStatementNode::WhileNode(self)
+    }
 }
 
 #[derive(Debug)]
@@ -493,6 +526,10 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for ExpressionStatementNode<'ctx, 'st> 
     }
 
     fn collect_symbols(&self, _path: &SymbolPath, _symtable: &mut SymbolTable) -> CompilerResult<()> { Ok(()) }
+
+    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st> {
+        AnyStatementNode::ExpressionStatementNode(self)
+    }
 }
 
 // **********************************
