@@ -32,6 +32,9 @@ pub enum OperatorType {
     Ampersand,
     Percent,
     Not,
+    Or,
+    LogicalOr,
+    LogicalAnd,
 }
 
 impl OperatorType {
@@ -57,6 +60,7 @@ impl OperatorType {
             '&' => Some(OperatorType::Ampersand),
             '%' => Some(OperatorType::Percent),
             '!' => Some(OperatorType::Not),
+            '|' => Some(OperatorType::Or),
             _ => None,
         }
     }
@@ -67,6 +71,8 @@ impl OperatorType {
             OperatorType::Less => true,
             OperatorType::Greater => true,
             OperatorType::Not => true,
+            OperatorType::Ampersand => true,
+            OperatorType::Or => true,
             _ => false,
         }
     }
@@ -89,6 +95,14 @@ impl OperatorType {
                 OperatorType::Equals => Some(OperatorType::NotEquals),
                 _ => None,
             },
+            OperatorType::Ampersand => match other {
+                OperatorType::Ampersand => Some(OperatorType::LogicalAnd),
+                _ => None,
+            },
+            OperatorType::Or => match other {
+                OperatorType::Or => Some(OperatorType::LogicalOr),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -109,7 +123,8 @@ pub enum Keyword {
     Int32,
     Int64,
     Float32,
-    Float64
+    Float64,
+    Bool,
 }
 
 impl Keyword {
@@ -129,6 +144,7 @@ impl Keyword {
             "i64" => Some(Keyword::Int64),
             "f32" => Some(Keyword::Float32),
             "f64" => Some(Keyword::Float64),
+            "bool" => Some(Keyword::Bool),
             _ => None,
         }
     }

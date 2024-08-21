@@ -74,7 +74,7 @@ fn main() -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
     }
 
-    // generator.print_module();
+    generator.print_module();
 
     generator.run();
 

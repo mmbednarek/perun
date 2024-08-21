@@ -25,6 +25,8 @@ pub enum BinaryOperation {
     NotEquals,
     Assign,
     Modulo,
+    LogicalAnd,
+    LogicalOr,
 }
 
 impl BinaryOperation {
@@ -42,23 +44,27 @@ impl BinaryOperation {
             OperatorType::NotEquals => Some(BinaryOperation::NotEquals),
             OperatorType::Equals => Some(BinaryOperation::Assign),
             OperatorType::Percent => Some(BinaryOperation::Modulo),
+            OperatorType::LogicalAnd => Some(BinaryOperation::LogicalAnd),
+            OperatorType::LogicalOr => Some(BinaryOperation::LogicalOr),
             _ => None
         }
     }
 
     pub fn proceedence(&self) -> i32 {
         match self {
-            BinaryOperation::Add => 3,
-            BinaryOperation::Subtract => 3,
-            BinaryOperation::Divide => 4,
-            BinaryOperation::Multiply => 4,
-            BinaryOperation::Modulo => 4,
-            BinaryOperation::Less => 2,
-            BinaryOperation::LessOrEqual => 2,
-            BinaryOperation::Greater => 2,
-            BinaryOperation::GreaterOrEqual => 2,
-            BinaryOperation::Equals => 2,
-            BinaryOperation::NotEquals => 2,
+            BinaryOperation::Add => 5,
+            BinaryOperation::Subtract => 5,
+            BinaryOperation::Divide => 6,
+            BinaryOperation::Multiply => 6,
+            BinaryOperation::Modulo => 6,
+            BinaryOperation::Less => 4,
+            BinaryOperation::LessOrEqual => 4,
+            BinaryOperation::Greater => 4,
+            BinaryOperation::GreaterOrEqual => 4,
+            BinaryOperation::Equals => 4,
+            BinaryOperation::NotEquals => 4,
+            BinaryOperation::LogicalAnd => 3,
+            BinaryOperation::LogicalOr => 2,
             BinaryOperation::Assign => 1,
         }
     }
@@ -205,6 +211,14 @@ pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>>;
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type>;
     fn get_location(&self) -> &Location;
+
+    fn generate_boolean(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, true_block: BasicBlock<'ctx>, false_block: BasicBlock<'ctx>) -> CompilerResult<()> {
+        let expr = self.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
+        let expr_int = basic_value_to_int(*self.get_location(), expr.as_ref())?;
+        let expr_bool = wrap_err(*self.get_location(), gen.builder.build_int_compare(IntPredicate::NE, expr_int, gen.context.i32_type().const_int(0, true), "tobool"))?;
+        wrap_err(*self.get_location(), gen.builder.build_conditional_branch(expr_bool, true_block, false_block))?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -472,27 +486,23 @@ pub struct IfNode<'ctx, 'st> {
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
-        let cond = self.condition.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
-        let cond_int = basic_value_to_int(self.location, cond.as_ref())?;
-
         let current_block = wrap_option(self.location, gen.builder.get_insert_block(), "statement not located in a valid block")?;
 
-        let iftrue = self.iftrue_scope.generate_il(gen, &path.sub("if"), function)?;
-        let postif = gen.context.append_basic_block(*function, "postif");
+        let ifthen = self.iftrue_scope.generate_il(gen, &path.sub("if"), function)?;
+
+        let ifend = gen.context.append_basic_block(*function, "if.end");
+        wrap_err(self.location, gen.builder.build_unconditional_branch(ifend))?;
 
         gen.builder.position_at_end(current_block);
-        wrap_err(self.location, gen.builder.build_conditional_branch(cond_int, iftrue, postif))?;
+        self.condition.generate_boolean(gen, path, function, ifthen, ifend)?;
 
-        gen.builder.position_at_end(iftrue);
-        wrap_err(self.location, gen.builder.build_unconditional_branch(postif))?;
-
-        gen.builder.position_at_end(postif);
+        gen.builder.position_at_end(ifend);
 
         Ok(())
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        self.iftrue_scope.collect_symbols(&path.sub("if"), symtable);
+        self.iftrue_scope.collect_symbols(&path.sub("if"), symtable)?;
         Ok(())
     }
 
@@ -510,30 +520,25 @@ pub struct WhileNode<'ctx, 'st> {
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()>{
-        let prewhile = gen.context.append_basic_block(*function, "while.cond");
-        wrap_err(self.location, gen.builder.build_unconditional_branch(prewhile))?;
-        gen.builder.position_at_end(prewhile);
+        let while_cond = gen.context.append_basic_block(*function, "while.cond");
+        wrap_err(self.location, gen.builder.build_unconditional_branch(while_cond))?;
+        gen.builder.position_at_end(while_cond);
 
+        let while_body = self.scope.generate_il(gen, &path.sub("while"), function)?;
+        wrap_err(self.location, gen.builder.build_unconditional_branch(while_cond))?;
 
-        let cond = self.condition.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
-        let cond_int = basic_value_to_int(self.location, cond.as_ref())?;
+        let while_end = gen.context.append_basic_block(*function, "while.end");
 
-        let scope = self.scope.generate_il(gen, &path.sub("while"), function)?;
-        let postwhile = gen.context.append_basic_block(*function, "while.end");
+        gen.builder.position_at_end(while_cond);
+        self.condition.generate_boolean(gen, path, function, while_body, while_end)?;
 
-        gen.builder.position_at_end(prewhile);
-        wrap_err(self.location, gen.builder.build_conditional_branch(cond_int, scope, postwhile))?;
-
-        gen.builder.position_at_end(scope);
-        wrap_err(self.location, gen.builder.build_unconditional_branch(prewhile))?;
-
-        gen.builder.position_at_end(postwhile);
+        gen.builder.position_at_end(while_end);
 
         Ok(())
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        self.scope.collect_symbols(&path.sub("while"), symtable);
+        self.scope.collect_symbols(&path.sub("while"), symtable)?;
         Ok(())
     }
 
@@ -702,6 +707,30 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
 
         self.operation.build(gen, &self.location, &deduced_type, left.as_ref(), right.as_ref())
+    }
+
+    fn generate_boolean(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, true_block: BasicBlock<'ctx>, false_block: BasicBlock<'ctx>) -> CompilerResult<()> {
+        match self.operation {
+            BinaryOperation::LogicalAnd => {
+                let and_block = gen.context.append_basic_block(*function, "and.pred");
+                self.left.generate_boolean(gen, path, function, and_block, false_block)?;
+                gen.builder.position_at_end(and_block);
+                self.right.generate_boolean(gen, path, function, true_block, false_block)?;
+            }
+            BinaryOperation::LogicalOr => {
+                let or_block = gen.context.append_basic_block(*function, "or.pred");
+                self.left.generate_boolean(gen, path, function, true_block, or_block)?;
+                gen.builder.position_at_end(or_block);
+                self.right.generate_boolean(gen, path, function, true_block, false_block)?;
+            }
+            _ => {
+                let expr = self.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
+                let expr_int = basic_value_to_int(*self.get_location(), expr.as_ref())?;
+                wrap_err(*self.get_location(), gen.builder.build_conditional_branch(expr_int, true_block, false_block))?;
+            }
+        };
+
+        Ok(())
     }
 
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {

@@ -20,6 +20,7 @@ pub enum Type {
     Int64,
     Float32,
     Float64,
+    Bool,
     Struct(String),
     Function(FuncTypeBox<Type>),
 }
@@ -35,6 +36,7 @@ impl Type {
             Keyword::Int64 => Some(Type::Int64),
             Keyword::Float32 => Some(Type::Float32),
             Keyword::Float64 => Some(Type::Float64),
+            Keyword::Bool => Some(Type::Bool),
             _ => None,
         }
     }
