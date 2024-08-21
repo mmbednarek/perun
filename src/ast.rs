@@ -18,6 +18,11 @@ pub enum BinaryOperation {
     Multiply,
     Divide,
     Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+    Equals,
+    NotEquals,
     Assign,
     Modulo,
 }
@@ -30,6 +35,11 @@ impl BinaryOperation {
             OperatorType::Asterisk => Some(BinaryOperation::Multiply),
             OperatorType::Slash => Some(BinaryOperation::Divide),
             OperatorType::Less => Some(BinaryOperation::Less),
+            OperatorType::LessOrEqual => Some(BinaryOperation::LessOrEqual),
+            OperatorType::Greater => Some(BinaryOperation::Greater),
+            OperatorType::GreaterOrEqual => Some(BinaryOperation::GreaterOrEqual),
+            OperatorType::EqualsEquals => Some(BinaryOperation::Equals),
+            OperatorType::NotEquals => Some(BinaryOperation::NotEquals),
             OperatorType::Equals => Some(BinaryOperation::Assign),
             OperatorType::Percent => Some(BinaryOperation::Modulo),
             _ => None
@@ -44,7 +54,24 @@ impl BinaryOperation {
             BinaryOperation::Multiply => 4,
             BinaryOperation::Modulo => 4,
             BinaryOperation::Less => 2,
+            BinaryOperation::LessOrEqual => 2,
+            BinaryOperation::Greater => 2,
+            BinaryOperation::GreaterOrEqual => 2,
+            BinaryOperation::Equals => 2,
+            BinaryOperation::NotEquals => 2,
             BinaryOperation::Assign => 1,
+        }
+    }
+
+    pub fn to_llvm_int_predicate(&self) -> Option<IntPredicate> {
+        match self {
+            BinaryOperation::Less => Some(IntPredicate::SLT),
+            BinaryOperation::LessOrEqual => Some(IntPredicate::SLE),
+            BinaryOperation::Greater => Some(IntPredicate::SGT),
+            BinaryOperation::GreaterOrEqual => Some(IntPredicate::SGE),
+            BinaryOperation::Equals => Some(IntPredicate::EQ),
+            BinaryOperation::NotEquals => Some(IntPredicate::NE),
+            _ => None,
         }
     }
 
@@ -82,14 +109,15 @@ impl BinaryOperation {
                 BinaryOperation::Multiply => {
                     return Ok(Box::new(wrap_err(*location, gen.builder.build_int_mul(lhs_int, rhs_int, "mul"))?));
                 },
-                BinaryOperation::Less => {
-                    return Ok(Box::new(wrap_err(*location, gen.builder.build_int_compare(IntPredicate::SLT, lhs_int, rhs_int, "less"))?));
-                },
                 BinaryOperation::Modulo => {
                     return Ok(Box::new(wrap_err(*location, gen.builder.build_int_signed_rem(lhs_int, rhs_int, "mod"))?));
                 },
-                _ => {
-                    compiler_err!(*location, "invalid operation");
+                binary_op => {
+                    if let Some(predicate) = binary_op.to_llvm_int_predicate() {
+                        return Ok(Box::new(wrap_err(*location, gen.builder.build_int_compare(predicate, lhs_int, rhs_int, "pred"))?));
+                    } else {
+                        compiler_err!(*location, "invalid operation");
+                    }
                 },
             };
         }

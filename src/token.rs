@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Location {
     pub line: u32,
@@ -23,12 +25,16 @@ pub enum OperatorType {
     Slash,
     Less,
     Greater,
+    LessOrEqual,
+    GreaterOrEqual,
+    EqualsEquals,
+    NotEquals,
     Ampersand,
     Percent,
+    Not,
 }
 
 impl OperatorType {
-
     pub fn from_char(ch: char) -> Option<OperatorType> {
         match ch {
             '+' => Some(OperatorType::Plus),
@@ -50,10 +56,42 @@ impl OperatorType {
             '>' => Some(OperatorType::Greater),
             '&' => Some(OperatorType::Ampersand),
             '%' => Some(OperatorType::Percent),
+            '!' => Some(OperatorType::Not),
             _ => None,
         }
     }
 
+    pub fn has_continuation(&self) -> bool {
+        match self {
+            OperatorType::Equals => true,
+            OperatorType::Less => true,
+            OperatorType::Greater => true,
+            OperatorType::Not => true,
+            _ => false,
+        }
+    }
+
+    pub fn join(&self, other: &OperatorType) -> Option<OperatorType> {
+        match self {
+            OperatorType::Equals => match other {
+                OperatorType::Equals => Some(OperatorType::EqualsEquals),
+                _ => None,
+            },
+            OperatorType::Less => match other {
+                OperatorType::Equals => Some(OperatorType::LessOrEqual),
+                _ => None,
+            },
+            OperatorType::Greater => match other {
+                OperatorType::Equals => Some(OperatorType::GreaterOrEqual),
+                _ => None,
+            },
+            OperatorType::Not => match other {
+                OperatorType::Equals => Some(OperatorType::NotEquals),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -35,12 +35,12 @@ fn main() -> std::io::Result<()> {
     let mut lexer = Lexer::new(Box::new(file_handle));
     lexer.read_tokens();
 
-    // {
-    //     let mut print_reader = TokenReader::new(lexer.tokens());
-    //     while print_reader.has_tokens() {
-    //         println!("token: {:?}", print_reader.next().unwrap().token_type);
-    //     }
-    // }
+    {
+        let mut print_reader = TokenReader::new(lexer.tokens());
+        while print_reader.has_tokens() {
+            println!("token: {:?}", print_reader.next().unwrap().token_type);
+        }
+    }
 
     let mut reader = TokenReader::new(lexer.tokens());
 
@@ -57,7 +57,7 @@ fn main() -> std::io::Result<()> {
     }
 
     let parsed = parsed_res.unwrap();
-    // println!("Parsed {:?}", parsed);
+    println!("Parsed {:?}", parsed);
 
 
     let path = SymbolPath::new();

@@ -10,7 +10,7 @@ fn int_log10(in_value: i32) : i32 {
   var x = in_value;
   var count = 0;
 
-  while 0 < x {
+  while x > 0 {
     x = x / 10;
     count = count + 1;
   }
@@ -28,7 +28,7 @@ fn cast_int_to_string(in_value: i32) : rawptr {
 
   buff[length] = i8(0);
 
-  while 0 < x {
+  while index >= 0 {
     rem = x % 10;
     buff[index] = i8(48 + rem);
     x = x / 10;
