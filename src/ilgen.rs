@@ -19,7 +19,7 @@ pub fn basic_value_to_int<'ctx>(location: Location, value: &dyn BasicValue<'ctx>
     if let BasicValueEnum::IntValue(int_val) = value.as_basic_value_enum() {
         return Ok(int_val);
     } else {
-        compiler_err!(location, "invalid type");
+        compiler_err!(location, "invalid type, value {} is not int", value.print_to_string());
     }
 }
 
@@ -27,7 +27,7 @@ pub fn basic_value_to_ptr<'ctx>(location: Location, value: &dyn BasicValue<'ctx>
     if let BasicValueEnum::PointerValue(ptr_val) = value.as_basic_value_enum() {
         return Ok(ptr_val);
     } else {
-        compiler_err!(location, "invalid type");
+        compiler_err!(location, "invalid type, value {} is not ptr", value.print_to_string());
     }
 }
 

@@ -221,8 +221,7 @@ pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
     fn get_location(&self) -> &Location;
 
     fn build_boolean_branch(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, true_block: BasicBlock<'ctx>, false_block: BasicBlock<'ctx>) -> CompilerResult<()> {
-        let deduced_type = self.deduce_type(&gen.symtable, path, &Type::Bool)?;
-        let value = self.generate_casted(gen, path, function, &deduced_type, &Type::Bool, &ValueType::RValue)?;
+        let value = self.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
         let value_int = basic_value_to_int(*self.get_location(), value.as_ref())?;
         wrap_err(*self.get_location(), gen.builder.build_conditional_branch(value_int, true_block, false_block))?;
         Ok(())
@@ -232,9 +231,14 @@ pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
         self.build_boolean_branch(gen, path, function, true_block, false_block)
     }
 
-    fn generate_casted(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, deduced_type: &Type, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+    fn generate_casted(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
         let stmt = self.generate_il(gen, path, function, expected_type, value_type)?;
-        gen.build_cast(*self.get_location(), deduced_type, expected_type, stmt)
+        if *value_type == ValueType::LValue {
+            Ok(stmt)
+        } else {
+            let deduced_type = self.deduce_type(&gen.symtable, path, &Type::Bool)?;
+            gen.build_cast(*self.get_location(), &deduced_type, expected_type, stmt)
+        }
     }
 }
 
@@ -423,7 +427,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for ReturnNode<'ctx, 'st> {
         if let Type::Function(func_type) = &func_symbol.data_type {
             match &self.expression {
                 Some(expr) => {
-                    let value = expr.generate_il(gen, path, function, &func_type.ret_type, &ValueType::RValue)?;
+                    let value = expr.generate_casted(gen, path, function, &func_type.ret_type, &ValueType::RValue)?;
                     wrap_err(self.location, gen.builder.build_return(Some(value.as_ref())))?;
                 },
                 None => {
@@ -468,7 +472,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
         let addr = gen.alloc_var(self.location, &symbol.data_type, &self.name)?;
         gen.addrtable.register_ptr(path.sub(self.name.as_ref()), addr);
 
-        let value = self.expression.generate_il(gen, path, function, &symbol.data_type, &ValueType::RValue)?;
+        let value = self.expression.generate_casted(gen, path, function, &symbol.data_type, &ValueType::RValue)?;
         if symbol.data_type.is_int_type() {
             let int_value = basic_value_to_int(self.location, value.as_ref())?;
             wrap_err(self.location, gen.builder.build_store(addr, int_value))?;
@@ -705,6 +709,26 @@ impl<'ctx, 'st> BinaryExpressionNode<'ctx, 'st> {
         _ => ValueType::RValue,
        }
     }
+
+    fn deduce_operand_and_out_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<(Type, Type)> {
+        let left_deduced_type = self.left.deduce_type(symtable, path, expected_type)?;
+        let right_deduced_type = self.right.deduce_type(symtable, path, expected_type)?;
+
+        if self.operation == BinaryOperation::Assign {
+            if left_deduced_type.is_void() {
+                Ok((right_deduced_type.clone(), right_deduced_type))
+            } else {
+                Ok((right_deduced_type.clone(), right_deduced_type))
+            }
+        } else {
+            let wider_type = left_deduced_type.wider_type(&right_deduced_type);
+            if self.operation.is_predicate() {
+                Ok((wider_type, Type::Bool))
+            } else {
+                Ok((wider_type.clone(), wider_type))
+            }
+        }
+    }
 }
 
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
@@ -718,16 +742,14 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
                 let and_block = gen.context.append_basic_block(*function, "and.pred");
                 let end_block = gen.context.append_basic_block(*function, "end.pred");
 
-                let left_deduced = self.left.deduce_type(&gen.symtable, path, &Type::Bool)?;
-                let left = self.left.generate_casted(gen, path, function, &left_deduced, &Type::Bool, &ValueType::RValue)?;
+                let left = self.left.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
                 let left_int = basic_value_to_int(*self.get_location(), left.as_ref())?;
                 let left_block = wrap_option(self.location, gen.builder.get_insert_block(), "invalid block")?;
                 wrap_err(*self.get_location(), gen.builder.build_conditional_branch(left_int, and_block, end_block))?;
 
                 gen.builder.position_at_end(and_block);
 
-                let right_deduced = self.right.deduce_type(&gen.symtable, path, &Type::Bool)?;
-                let right = self.right.generate_casted(gen, path, function, &right_deduced, &Type::Bool, &ValueType::RValue)?;
+                let right = self.right.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
                 let right_block = wrap_option(self.location, gen.builder.get_insert_block(), "invalid block")?;
                 wrap_err(self.location, gen.builder.build_unconditional_branch(end_block))?;
 
@@ -742,16 +764,14 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
                 let or_block = gen.context.append_basic_block(*function, "or.pred");
                 let end_block = gen.context.append_basic_block(*function, "end.pred");
 
-                let left_deduced = self.left.deduce_type(&gen.symtable, path, &Type::Bool)?;
-                let left = self.left.generate_casted(gen, path, function, &left_deduced, &Type::Bool, &ValueType::RValue)?;
+                let left = self.left.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
                 let left_int = basic_value_to_int(*self.get_location(), left.as_ref())?;
                 let left_block = wrap_option(self.location, gen.builder.get_insert_block(), "invalid block")?;
                 wrap_err(*self.get_location(), gen.builder.build_conditional_branch(left_int, end_block, or_block))?;
 
                 gen.builder.position_at_end(or_block);
 
-                let right_deduced = self.right.deduce_type(&gen.symtable, path, &Type::Bool)?;
-                let right = self.right.generate_casted(gen, path, function, &right_deduced, &Type::Bool, &ValueType::RValue)?;
+                let right = self.right.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
                 let right_block = wrap_option(self.location, gen.builder.get_insert_block(), "invalid block")?;
                 wrap_err(self.location, gen.builder.build_unconditional_branch(end_block))?;
 
@@ -767,10 +787,10 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
         // For assigment we always expect the left hand side to be an l-value.
         let left_value_type = self.deduce_left_value_type();
-        let deduced_type = self.deduce_type(&gen.symtable, path, expected_type)?;
+        let (operand_type, deduced_type) = self.deduce_operand_and_out_type(&gen.symtable, path, expected_type)?;
 
-        let left = self.left.generate_il(gen, path, function, &deduced_type, &left_value_type)?;
-        let right = self.right.generate_il(gen, path, function, &deduced_type, &ValueType::RValue)?;
+        let left = self.left.generate_casted(gen, path, function, &operand_type, &left_value_type)?;
+        let right = self.right.generate_casted(gen, path, function, &operand_type, &ValueType::RValue)?;
 
         self.operation.build(gen, &self.location, &deduced_type, left.as_ref(), right.as_ref())
     }
@@ -798,20 +818,8 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
     }
 
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
-        let left_deduced_type = self.left.deduce_type(symtable, path, expected_type)?;
-        let right_deduced_type = self.right.deduce_type(symtable, path, expected_type)?;
-
-        if self.operation == BinaryOperation::Assign {
-            if left_deduced_type.is_void() {
-                Ok(right_deduced_type)
-            } else {
-                Ok(left_deduced_type)
-            }
-        } else if self.operation.is_predicate() {
-            Ok(Type::Bool)
-        } else {
-            Ok(left_deduced_type.wider_type(&right_deduced_type))
-        }
+        let (_, out_type) = self.deduce_operand_and_out_type(symtable, path, expected_type)?;
+        Ok(out_type)
     }
 
     fn get_location(&self) -> &Location {
@@ -851,8 +859,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
                 }
             },
             SingularOperation::Not => {
-                let expr_type = self.expr.deduce_type(&gen.symtable, path, &Type::Bool)?;
-                let expr_value = self.expr.generate_casted(gen, path, function, &expr_type, &Type::Bool, &ValueType::RValue)?;
+                let expr_value = self.expr.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
                 let expr_int = basic_value_to_int(self.location, expr_value.as_ref())?;
                 let result = wrap_err(self.location, gen.builder.build_xor(expr_int, gen.context.bool_type().const_int(1, false), "not.result"))?;
                 Ok(Box::new(result))
@@ -958,7 +965,8 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetElementNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, expected_type: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
         let obj_value = self.object.generate_il(gen, path, function, &Type::RawPtr, &ValueType::RValue)?;
         let obj_ptr = basic_value_to_ptr(self.location, obj_value.as_ref())?;
-        let index_value = self.index.generate_il(gen, path, function, &Type::Int32, &ValueType::RValue)?;
+        let index_type = self.index.deduce_type(&gen.symtable, path, expected_type)?;
+        let index_value = self.index.generate_il(gen, path, function, &index_type, &ValueType::RValue)?;
         let index = basic_value_to_int(self.location, index_value.as_ref())?;
 
         let indexed_ptr = gen.build_get_element_ptr(self.location, expected_type, obj_ptr, index, "addrindex")?;

@@ -55,7 +55,7 @@ fn print_int(in_value: i32) {
 }
 
 fn check_condition(a: i32, b: i32, c: i32, d: i32) : bool {
-    return a && b || !(c && d);
+    return !(a && b) || c && d;
 }
 
 fn main() : i32 {

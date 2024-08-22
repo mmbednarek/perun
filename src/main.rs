@@ -31,7 +31,7 @@ use symbols::{SymbolTable, SymbolPath};
 mod address_table;
 
 fn main() -> std::io::Result<()> {
-    let file_handle = File::open("example.pr")?;
+    let file_handle = File::open("fibbonacci.pr")?;
     let mut lexer = Lexer::new(Box::new(file_handle));
     lexer.read_tokens();
 
