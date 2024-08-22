@@ -1,0 +1,98 @@
+extern fn write(fd: i32, buff: rawptr, count: i64): i64;
+extern fn read(fd: i32, buff: rawptr, count: i64): i64;
+extern fn fsync(fd: i32): i32;
+extern fn malloc(size: i64): rawptr;
+extern fn free(ptr: rawptr);
+extern fn strlen(str: rawptr): i64;
+extern fn atoi(str: rawptr): i32;
+
+fn int_log10(in_value: i32) : i32 {
+  var x = in_value;
+  var count = 0;
+
+  while x > 0 {
+    x = x / 10;
+    count = count + 1;
+  }
+
+  return count;
+}
+
+fn cast_int_to_string(in_value: i32) : rawptr {
+  var x = in_value;
+
+  var length = int_log10(in_value);
+  var buff = malloc(length + 2);
+  var index = length - 1;
+  var rem = 0;
+
+  if in_value == 0 {
+    length = 1;
+    buff[0] = 48;
+  }
+
+  buff[length] = i8(0);
+
+  while index >= 0 {
+    rem = x % 10;
+    buff[index] = i8(48 + rem);
+    x = x / 10;
+    index = index - 1;
+  }
+
+  return buff;
+}
+
+fn print(msg: rawptr) {
+  write(1, msg, strlen(msg));
+  fsync(1);
+}
+
+fn print_int(in_value: i32) {
+  var str = cast_int_to_string(in_value);
+  print(str);
+  free(str);
+}
+
+fn check_condition(a: i32, b: i32, c: i32, d: i32) : bool {
+    return a && b || !(c && d);
+}
+
+fn main() : i32 {
+    var a = 0;
+    var b = 0;
+    var c = 0;
+    var d = 0;
+    var result = 0;
+
+    while a < 2 {
+        while b < 2 {
+            while c < 2 {
+                while d < 2 {
+                    print("check_cond(");
+                    print_int(a);
+                    print(", ");
+                    print_int(b);
+                    print(", ");
+                    print_int(c);
+                    print(", ");
+                    print_int(d);
+                    print(") = ");
+
+                    result = check_condition(a, b, c, d);
+                    print_int(result);
+                    print("\n");
+                    d = d + 1;
+                }
+                c = c + 1;
+                d = 0;
+            }
+            b = b + 1;
+            c = 0;
+        }
+        a = a + 1;
+        b = 0;
+    }
+
+    return 0;
+}

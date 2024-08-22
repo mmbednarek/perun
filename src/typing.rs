@@ -51,6 +51,7 @@ impl Type {
             Type::Int64 => Some(AnyTypeEnum::IntType(ctx.i64_type())),
             Type::Float32 => Some(AnyTypeEnum::FloatType(ctx.f32_type())),
             Type::Float64 => Some(AnyTypeEnum::FloatType(ctx.f64_type())),
+            Type::Bool => Some(AnyTypeEnum::IntType(ctx.bool_type())),
             _ => None,
         }
     }
@@ -61,6 +62,14 @@ impl Type {
             Type::Int16 => true,
             Type::Int32 => true,
             Type::Int64 => true,
+            Type::Bool => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_bool_type(&self) -> bool {
+        match self {
+            Type::Bool => true,
             _ => false,
         }
     }

@@ -41,6 +41,7 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
             last_op = self.last_op();
         }
         self.op_stack.push(op);
+        self.last_is_op = true;
         Ok(())
     }
 

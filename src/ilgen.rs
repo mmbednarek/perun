@@ -3,15 +3,33 @@ use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::types::AnyTypeEnum;
-use inkwell::values::{PointerValue, BasicValueEnum, BasicValue, IntValue};
-use inkwell::OptimizationLevel;
+use inkwell::values::{PointerValue, BasicValueEnum, BasicValue, IntValue, FunctionValue};
+use inkwell::basic_block::BasicBlock;
+use inkwell::{OptimizationLevel, IntPredicate};
+use crate::ast::ExpressionNode;
 use crate::token::Location;
 use crate::symbols::{SymbolTable, SymbolInfo, SymbolPath};
 use crate::address_table::AddressTable;
-use crate::typing::Type;
-use crate::error::{CompilerResult, wrap_option, wrap_err, err_with_location};
+use crate::typing::{Type, ValueType};
+use crate::error::{err_with_location, wrap_err, wrap_option, CompilerResult};
 
 type MainFunc = unsafe extern "C" fn() -> i32;
+
+pub fn basic_value_to_int<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<IntValue<'ctx>> {
+    if let BasicValueEnum::IntValue(int_val) = value.as_basic_value_enum() {
+        return Ok(int_val);
+    } else {
+        compiler_err!(location, "invalid type");
+    }
+}
+
+pub fn basic_value_to_ptr<'ctx>(location: Location, value: &dyn BasicValue<'ctx>) -> CompilerResult<PointerValue<'ctx>> {
+    if let BasicValueEnum::PointerValue(ptr_val) = value.as_basic_value_enum() {
+        return Ok(ptr_val);
+    } else {
+        compiler_err!(location, "invalid type");
+    }
+}
 
 pub struct IlGenerator<'ctx, 'st> {
     pub context: &'ctx Context,
@@ -80,5 +98,30 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
 
     pub fn null_ptr(&self) -> Box<dyn BasicValue<'ctx> + 'ctx>{
         Box::new(self.context.ptr_type(0.into()).const_null())
+    }
+
+    pub fn build_cast(&self, location: Location, source_type: &Type, target_type: &Type, value: Box<dyn BasicValue<'ctx> + 'ctx>) -> CompilerResult<Box<dyn BasicValue<'ctx> + 'ctx>> {
+        if *source_type == *target_type {
+            return Ok(value);
+        }
+
+        if !source_type.is_int_type() {
+            compiler_err!(location, "source cast must be an int");
+        }
+
+        let int_value = basic_value_to_int(location, value.as_ref())?;
+
+        if target_type.is_bool_type() {
+            Ok(Box::new(wrap_err(location, self.builder.build_int_compare(IntPredicate::NE, int_value, self.context.i32_type().const_int(0, true), "tobool"))?))
+        } else if target_type.is_int_type() {
+
+            if target_type.byte_count() > source_type.byte_count() {
+                Ok(Box::new(self.build_sext(location, target_type, int_value, "intsext")?))
+            } else {
+                Ok(Box::new(self.build_trunc(location, target_type, int_value, "inttrunc")?))
+            }
+        } else {
+            compiler_err!(location, "unsuported cast target type");
+        }
     }
 }

@@ -1,5 +1,3 @@
-use std::fs::OpenOptions;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Location {
     pub line: u32,
