@@ -1,9 +1,12 @@
+use std::path::Path;
+
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::types::AnyTypeEnum;
 use inkwell::values::{PointerValue, BasicValueEnum, BasicValue, IntValue, FunctionValue};
+use inkwell::targets::{TargetMachine, Target, RelocMode, CodeModel, FileType, TargetMachineOptions};
 use inkwell::basic_block::BasicBlock;
 use inkwell::{OptimizationLevel, IntPredicate};
 use crate::ast::ExpressionNode;
@@ -37,14 +40,18 @@ pub struct IlGenerator<'ctx, 'st> {
     pub builder: Builder<'ctx>,
     pub exe: ExecutionEngine<'ctx>,
     pub symtable: &'st SymbolTable,
-    pub addrtable: AddressTable<'ctx>
+    pub addrtable: AddressTable<'ctx>,
+    pub machine: TargetMachine,
 }
 
 impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
     pub fn new(context: &'ctx Context, symtable: &'st SymbolTable) -> Self {
         let module = context.create_module("output");
         let builder = context.create_builder();
-        let exe = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
+        let exe: ExecutionEngine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
+        let triple = TargetMachine::get_default_triple();
+        let target = Target::from_triple(&triple).unwrap();
+        let target_config = TargetMachineOptions::default().set_cpu("generic").set_features("").set_reloc_mode(RelocMode::PIC);
 
         Self{
             context,
@@ -53,6 +60,7 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
             exe,
             symtable,
             addrtable: AddressTable::new(),
+            machine: target.create_target_machine_from_options(&triple, target_config).unwrap(),
         }
     }
 
@@ -62,6 +70,10 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
 
     pub fn run(&mut self) -> i32 {
         unsafe{ self.exe.get_function::<MainFunc>("main").unwrap().call() }
+    }
+
+    pub fn compile(&self, file: FileType, path: &Path) {
+        self.machine.write_to_file(&self.module, file, path).unwrap();
     }
 
     pub fn load_var(&self, location: Location, var_type: &Type, ptr: &PointerValue<'ctx>, name: &str) -> CompilerResult<BasicValueEnum<'ctx>> {

@@ -81,7 +81,7 @@ fn fib(n: i32) {
   }
 }
 
-fn main() : i32 {
+fn main(argc: i32, argv: rawptr) : i32 {
   print("Example application written in PERUN\n");
   print("Input number of fibbonacci number to generate: ");
   fib(read_int());

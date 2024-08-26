@@ -341,7 +341,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
             _ => { compiler_err!(self.location, "failed to map llvm type") },
         };
 
-        let function = gen.module.add_function(&self.name, fn_type, None);
+        let function = gen.module.add_function(&self.name, fn_type, Some(Linkage::DLLExport));
 
         gen.addrtable.register_func(path.sub(&self.name), function);
 
