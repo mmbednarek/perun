@@ -718,7 +718,7 @@ impl<'ctx, 'st> BinaryExpressionNode<'ctx, 'st> {
             if left_deduced_type.is_void() {
                 Ok((right_deduced_type.clone(), right_deduced_type))
             } else {
-                Ok((right_deduced_type.clone(), right_deduced_type))
+                Ok((left_deduced_type.clone(), left_deduced_type))
             }
         } else {
             let wider_type = left_deduced_type.wider_type(&right_deduced_type);

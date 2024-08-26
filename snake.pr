@@ -1,0 +1,242 @@
+extern fn SDL_Init(flags: i32): i32;
+extern fn SDL_CreateWindow(title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32): rawptr;
+extern fn SDL_PollEvent(event: rawptr): i32;
+extern fn SDL_CreateRenderer(wnd: rawptr, idk: i32, flags: i32): rawptr;
+extern fn SDL_RenderClear(renderer: rawptr): i32;
+extern fn SDL_RenderPresent(renderer: rawptr);
+extern fn SDL_Delay(ms: i32);
+extern fn SDL_SetRenderDrawColor(renderer: rawptr, r: i8, g: i8, b: i8, a: i8): i32;
+extern fn SDL_RenderFillRect(renderer: rawptr, rect: rawptr): i32;
+
+extern fn write(fd: i32, buff: rawptr, count: i64): i64;
+extern fn malloc(size: i64): rawptr;
+extern fn free(ptr: rawptr);
+extern fn fsync(fd: i32): i32;
+extern fn strlen(str: rawptr): i64;
+extern fn rand(): i32;
+
+// struct SDL_CommonEvent {
+//     event_type: i32,
+//     timestamp: i32,
+// }
+
+extern fn puts(str: rawptr): i32;
+
+fn int_log10(in_value: i32) : i32 {
+  var x = in_value;
+  var count = 0;
+
+  while x > 0 {
+    x = x / 10;
+    count = count + 1;
+  }
+
+  return count;
+}
+
+fn cast_int_to_string(in_value: i32) : rawptr {
+  var x = in_value;
+
+  var length = int_log10(in_value);
+  var buff = malloc(length + 2);
+  var index = length - 1;
+  var rem = 0;
+
+  if in_value == 0 {
+    length = 1;
+    buff[0] = 48;
+  }
+
+  buff[length] = i8(0);
+
+  while index >= 0 {
+    rem = x % 10;
+    buff[index] = i8(48 + rem);
+    x = x / 10;
+    index = index - 1;
+  }
+
+  return buff;
+}
+
+fn print(msg: rawptr) {
+  write(1, msg, strlen(msg));
+  fsync(1);
+}
+
+fn print_int(in_value: i32) {
+  var str = cast_int_to_string(in_value);
+  print(str);
+  free(str);
+}
+
+
+fn main() : i32 {
+    if SDL_Init(62001) != 0 {
+        puts("failed to initialize SDL");
+        return 1;
+    }
+
+    var wnd_handle = SDL_CreateWindow("Snake Game", 805240832, 805240832, 800, 600, 0);
+    var event_ptr = malloc(56);
+    var is_running: bool = 1;
+    var event_type: i32 = 0;
+    var key_type: i32 = 0;
+    var renderer_handle = SDL_CreateRenderer(wnd_handle, 0-1, 2);
+    var rect = malloc(16);
+    var snake = malloc(8*16);
+    var x: i32 = 150;
+    var y: i32 = 150;
+    var next_x: i32 = 150;
+    var next_y: i32 = 150;
+    var motion_x: i32 = 0;
+    var motion_y: i32 = 0;
+    var next_motion_x: i32 = 0;
+    var next_motion_y: i32 = 0;
+    var head: i32 = 7;
+    var index = 0;
+    var speed = 5;
+    var target_x = rand() % (800-32);
+    var target_y = rand() % (600-32);
+
+    x = 32;
+    index = 0;
+    while index <= head {
+        snake[4*index + 0] = x;
+        snake[4*index + 1] = 128;
+        snake[4*index + 2] = 0;
+        snake[4*index + 3] = 0;
+
+        x = x + 32;
+        index = index + 1;
+    }
+
+    rect[2] = i32(32);
+    rect[3] = i32(32);
+
+    while is_running {
+        while SDL_PollEvent(event_ptr) {
+            event_type = *event_ptr;
+
+            if event_type == 256 {
+                is_running = 0;
+            }
+            if event_type == 768 {
+                key_type = event_ptr[4];
+
+                motion_x = snake[4*head + 2];
+                motion_y = snake[4*head + 3];
+
+                // Up Event
+                if key_type == 26 && motion_y <= 0 {
+                    motion_y = 0-speed;
+                    motion_x = 0;
+                }
+                // Down Event
+                if key_type == 22 && motion_y >= 0 {
+                    motion_y = speed;
+                    motion_x = 0;
+                }
+                // Left Event
+                if key_type == 4 && motion_x <= 0 {
+                    motion_y = 0;
+                    motion_x = 0-speed;
+                }
+                // Right Event
+                if key_type == 7 && motion_x >= 0 {
+                    motion_y = 0;
+                    motion_x = speed;
+                }
+
+                snake[4*head + 2] = motion_x;
+                snake[4*head + 3] = motion_y;
+            }
+        }
+
+        index = 0;
+        while index < head {
+            x = snake[4*index + 0];
+            y = snake[4*index + 1];
+            next_x = snake[4*(index+1) + 0];
+            next_y = snake[4*(index+1) + 1];
+            motion_x = snake[4*index + 2];
+            motion_y = snake[4*index + 3];
+            next_motion_x = snake[4*(index+1) + 2];
+            next_motion_y = snake[4*(index+1) + 3];
+
+            if next_motion_x != 0 && (motion_y >= 0 && y >= next_y || motion_y <= 0 && y <= next_y) {
+                if next_motion_x > 0 {
+                    snake[4*index + 0] = next_x-32;
+                }
+                if next_motion_x < 0 {
+                    snake[4*index + 0] = next_x+32;
+                }
+                snake[4*index + 1] = next_y;
+                snake[4*index + 2] = next_motion_x;
+                snake[4*index + 3] = next_motion_y;
+            }
+
+            if next_motion_y != 0 && (motion_x >= 0 && x >= next_x || motion_x <= 0 && x <= next_x) {
+                snake[4*index + 0] = next_x;
+
+                if next_motion_y > 0 {
+                    snake[4*index + 1] = next_y-32;
+                }
+                if next_motion_y < 0 {
+                    snake[4*index + 1] = next_y+32;
+                }
+
+                snake[4*index + 2] = next_motion_x;
+                snake[4*index + 3] = next_motion_y;
+            }
+
+            index = index + 1;
+        }
+
+        index = 0;
+        while index <= head {
+            snake[4*index] = i32(snake[4*index]) + i32(snake[4*index + 2]);
+            snake[4*index + 1] = i32(snake[4*index + 1]) + i32(snake[4*index + 3]);
+            index = index + 1;
+        }
+
+        // Check if reached target AABB
+        x = snake[4*head];
+        y = snake[4*head + 1];
+
+        if x < target_x + 32 && x + 32 > target_x && y < target_y + 32 && y + 32 > target_y {
+            target_x = rand() % (800-32);
+            target_y = rand() % (600-32);
+
+            print("new apple position: ");
+            print_int(target_x);
+            print(", ");
+            print_int(target_y);
+            print("\n");
+        }
+
+        SDL_RenderClear(renderer_handle);
+
+        SDL_SetRenderDrawColor(renderer_handle, 255, 0, 0, 255);
+
+        index = 0;
+        while index <= head {
+            rect[0] = i32(snake[4*index]);
+            rect[1] = i32(snake[4*index + 1]);
+            SDL_RenderFillRect(renderer_handle, rect);
+            index = index + 1;
+        }
+
+        SDL_SetRenderDrawColor(renderer_handle, 0, 255, 0, 255);
+        rect[0] = target_x;
+        rect[1] = target_y;
+        SDL_RenderFillRect(renderer_handle, rect);
+
+        SDL_SetRenderDrawColor(renderer_handle, 0, 0, 0, 255);
+
+        SDL_RenderPresent(renderer_handle);
+        SDL_Delay(15);
+    }
+
+    return 0;
+}

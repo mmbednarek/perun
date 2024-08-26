@@ -90,7 +90,15 @@ impl SymbolTable {
     }
 
     pub fn find_by_path(&self, path: &SymbolPath) -> Option<&SymbolInfo> {
-        self.symbols.get(path)
+        let mut current_path = path.clone();
+        while !current_path.is_empty() {
+            let sym = self.symbols.get(&current_path);
+            if sym.is_some() {
+                return sym;
+            }
+            current_path.truncate_to_parent();
+        }
+        None
     }
 
     pub fn print_symbols(&self) {
