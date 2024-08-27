@@ -289,11 +289,16 @@ impl<'ctx, 'st> ScopeNode<'ctx, 'st> {
         let basic_block = gen.context.append_basic_block(*function, &self.name);
         gen.builder.position_at_end(basic_block);
 
+        self.generate_to_current_block(gen, path, function)?;
+        
+        Ok(basic_block)
+    }
+
+    fn generate_to_current_block(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
         for stmt in &self.body {
             stmt.generate_il(gen, path, function)?;
         }
-        
-        Ok(basic_block)
+        Ok(())
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
@@ -357,7 +362,20 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
         gen.addrtable.register_func(path.sub(&self.name), function);
 
         match &self.scope {
-            Some(scope) => { scope.generate_il(gen, &path.sub(&self.name), &function)?; },
+            Some(scope) => {
+                let basic_block = gen.context.append_basic_block(function, &self.name);
+                gen.builder.position_at_end(basic_block);
+
+                let func_path = path.sub(&self.name);
+                for (path, sym) in gen.symtable.iterate_path(&func_path) {
+                    if sym.sym_type == SymbolType::LocalVariable {
+                        let addr = gen.alloc_var(self.location, &sym.data_type, &sym.name)?;
+                        gen.addrtable.register_ptr(path.clone(), addr);
+                    }
+                }
+
+                scope.generate_to_current_block(gen, &func_path, &function)?;
+            },
             None => {},
         }
 
@@ -440,9 +458,7 @@ impl<'ctx, 'st> VarDeclNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
         let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
-        
-        let addr = gen.alloc_var(self.location, &symbol.data_type, &self.name)?;
-        gen.addrtable.register_ptr(path.sub(self.name.as_ref()), addr);
+        let addr = *err_with_location(self.location, gen.addrtable.find_symbol(path, &self.name))?;
 
         let value = self.expression.generate_casted(gen, path, function, &symbol.data_type, &ValueType::RValue)?;
         if symbol.data_type.is_int_type() {
@@ -456,7 +472,6 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
         } else {
             compiler_err!(self.location, "unsupported variable type")
         }
-
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::typing::Type;
 use crate::error::{SymbolLookupError, SymbolLookupResult};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SymbolType {
     Global,
     FunctionArg(usize),

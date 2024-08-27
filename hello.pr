@@ -57,10 +57,10 @@ fn print_int(in_value: i32) {
 
 fn main(argc: i32, argv: rawptr) : i32 {
     var x = 0;
-
     var x_ptr = &x;
 
     while x < 10 {
+        var x_ptr = &x;
         print_int(x);
         puts(" Hello World!");
         *x_ptr = x + 1;

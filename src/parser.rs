@@ -129,7 +129,7 @@ where 'st: 'ctx {
                     Keyword::Extern => {
                         self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
 
-                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location, FunctionLinkage::Standard)?);
+                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location, FunctionLinkage::External)?);
                         result.body.push(extern_func);
                     },
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
