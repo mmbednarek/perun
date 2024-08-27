@@ -240,6 +240,10 @@ pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
             gen.build_cast(*self.get_location(), &deduced_type, expected_type, stmt)
         }
     }
+
+    fn to_constexpr_value(&self, _: &mut IlGenerator<'ctx, 'st>, _: &SymbolPath, _: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
+        compiler_err!(*self.get_location(), "expression cannot be resolved at compile time");
+    }
 }
 
 #[derive(Debug)]
@@ -305,6 +309,33 @@ impl<'ctx, 'st> ScopeNode<'ctx, 'st> {
         for stmt in &self.body {
             stmt.collect_symbols(path, symtable)?;
         }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ConstDeclNode<'ctx, 'st> {
+    pub location: Location,
+    pub name: String,
+    pub const_type: Option<Type>,
+    pub value : ExpressionBox<'ctx, 'st>,
+}
+
+impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ConstDeclNode<'ctx, 'st> {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath) -> CompilerResult<()> {
+        let sym_path = path.sub(&self.name);
+        let sym = wrap_option(self.location, gen.symtable.find_by_path(&sym_path), "internal error")?;
+        let basic_val = self.value.to_constexpr_value(gen, path, &sym.data_type)?;
+        gen.addrtable.register_basic_value(sym_path, basic_val);
+        Ok(())
+    }
+
+    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
+        let expected_type = match self.const_type.clone() {
+            Some(t) => t,
+            None => self.value.deduce_type(symtable, path, &Type::Void)?,
+        };
+        err_with_location(self.location, symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::Global, data_type: expected_type, location: self.location}))?;
         Ok(())
     }
 }
@@ -496,7 +527,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
         let current_block = wrap_option(self.location, gen.builder.get_insert_block(), "statement not located in a valid block")?;
 
-        let ifthen = self.iftrue_scope.generate_il(gen, &path.sub("if"), function)?;
+        let ifthen = self.iftrue_scope.generate_il(gen, &path.sub(&self.iftrue_scope.name), function)?;
 
         let ifend = gen.context.append_basic_block(*function, "if.end");
         wrap_err(self.location, gen.builder.build_unconditional_branch(ifend))?;
@@ -510,7 +541,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        self.iftrue_scope.collect_symbols(&path.sub("if"), symtable)?;
+        self.iftrue_scope.collect_symbols(&path.sub(&self.iftrue_scope.name), symtable)?;
         Ok(())
     }
 
@@ -532,7 +563,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
         wrap_err(self.location, gen.builder.build_unconditional_branch(while_cond))?;
         gen.builder.position_at_end(while_cond);
 
-        let while_body = self.scope.generate_il(gen, &path.sub("while"), function)?;
+        let while_body = self.scope.generate_il(gen, &path.sub(&self.scope.name), function)?;
         wrap_err(self.location, gen.builder.build_unconditional_branch(while_cond))?;
 
         let while_end = gen.context.append_basic_block(*function, "while.end");
@@ -546,7 +577,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        self.scope.collect_symbols(&path.sub("while"), symtable)?;
+        self.scope.collect_symbols(&path.sub(&self.scope.name), symtable)?;
         Ok(())
     }
 
@@ -597,7 +628,11 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
                     ValueType::RValue => Ok(Box::new(gen.load_var(self.location, &sym.data_type, ptr, self.name.as_ref())?)),
                     ValueType::None => Ok(gen.null_ptr()),
                 }
-            }
+            },
+            SymbolType::Global => {
+                let basic_val = wrap_option(self.location, gen.addrtable.find_basic_value(path, &self.name), "unable to find value")?;
+                Ok(Box::new(basic_val.as_basic_value_enum()))
+            },
             _ => {compiler_err!(self.location, "TODO: Implement")},
         }
     }
@@ -624,13 +659,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
             compiler_err!(self.location, "tried to interpret a number as an l-value");
         }
 
-        let num_type = self.deduce_type(&gen.symtable, path, expected_type)?;
-        let llvm_type = wrap_option(self.location, num_type.to_llvm_type(gen.context), "unable to map llvm type")?;
-        if let AnyTypeEnum::IntType(it) = llvm_type {
-            Ok(Box::new(it.const_int(self.number, true)))
-        } else {
-            compiler_err!(self.location, "tried assiging number to a non int type");
-        }
+        self.to_constexpr_value(gen, path, expected_type)
     }
 
     fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, expected_type: &Type) -> CompilerResult<Type> {
@@ -647,6 +676,16 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
 
     fn get_location(&self) -> &Location {
         &self.location
+    }
+
+    fn to_constexpr_value(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, expected_type: &Type) -> CompilerResult<BasicValueBox<'ctx>> {
+        let num_type = self.deduce_type(&gen.symtable, path, expected_type)?;
+        let llvm_type = wrap_option(self.location, num_type.to_llvm_type(gen.context), "unable to map llvm type")?;
+        if let AnyTypeEnum::IntType(it) = llvm_type {
+            Ok(Box::new(it.const_int(self.number, true)))
+        } else {
+            compiler_err!(self.location, "tried assiging number to a non int type");
+        }
     }
 }
 

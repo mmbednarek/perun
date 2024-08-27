@@ -1,4 +1,5 @@
 use inkwell::module::Linkage;
+use rand::{distributions::Alphanumeric, Rng};
 
 use crate::token_reader::TokenReader;
 use crate::token::{TokenType, OperatorType, Location, Keyword};
@@ -6,6 +7,15 @@ use crate::error::{CompilerResult, wrap_option};
 use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
+
+fn get_random_identifier(prefix: &str) -> String {
+    let random_str: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(7)
+        .map(char::from)
+        .collect();
+    format!("{}_{}", prefix, random_str)
+}
 
 struct ExpressionBuilder<'ctx, 'st>
     where 'st: 'ctx {
@@ -131,6 +141,10 @@ where 'st: 'ctx {
 
                         let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location, FunctionLinkage::External)?);
                         result.body.push(extern_func);
+                    },
+                    Keyword::Const => {
+                        let const_expr: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_const_decl(location)?);
+                        result.body.push(const_expr);
                     },
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
                 }
@@ -290,13 +304,15 @@ where 'st: 'ctx {
 
     fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode<'ctx, 'st>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
-        let scope = self.parse_scope("if.body")?;
+        let scope_name = get_random_identifier("if_body");
+        let scope = self.parse_scope(&scope_name)?;
         Ok(IfNode{location, condition: expr, iftrue_scope: scope})
     }
 
     fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode<'ctx, 'st>> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
-        let scope = self.parse_scope("while.body")?;
+        let scope_name = get_random_identifier("while_body");
+        let scope = self.parse_scope(&scope_name)?;
         Ok(WhileNode{location, condition: expr, scope})
     }
 
@@ -380,5 +396,26 @@ where 'st: 'ctx {
         }
 
         Ok(FunctionCall{location, name: name.to_string(), args})
+    }
+
+    fn parse_const_decl(&mut self, location: Location) -> CompilerResult<ConstDeclNode<'ctx, 'st>> {
+        let name = self.reader.expect_identifier()?;
+        let eq_or_colon = self.reader.next()?.clone();
+
+        let const_type = match eq_or_colon.token_type {
+            TokenType::Operator(OperatorType::Colon) => {
+                let parsed_type = self.parse_type()?;
+                self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
+                Some(parsed_type)
+            },
+            TokenType::Operator(OperatorType::Equals) => {
+                None
+            },
+            token => compiler_err!(eq_or_colon.location, "unexpected token: {:?}", token),
+        };
+
+        let value = self.parse_expression(OperatorType::Semicolon)?;
+
+        Ok(ConstDeclNode{location, name, const_type, value})
     }
 }

@@ -1,11 +1,8 @@
-extern fn puts(str: rawptr): i32;
 extern fn write(fd: i32, buff: rawptr, count: i64): i64;
-extern fn read(fd: i32, buff: rawptr, count: i64): i64;
-extern fn fsync(fd: i32): i32;
 extern fn malloc(size: i64): rawptr;
 extern fn free(ptr: rawptr);
+extern fn fsync(fd: i32): i32;
 extern fn strlen(str: rawptr): i64;
-extern fn atoi(str: rawptr): i32;
 
 fn int_log10(in_value: i32) : i32 {
   var x = in_value;
@@ -53,20 +50,4 @@ fn print_int(in_value: i32) {
   var str = cast_int_to_string(in_value);
   print(str);
   free(str);
-}
-
-const COUNT = 10;
-
-fn main(argc: i32, argv: rawptr) : i32 {
-    var x = 0;
-    var x_ptr = &x;
-
-    while x < COUNT {
-        var x_ptr = &x;
-        print_int(x);
-        puts(" Hello World!");
-        *x_ptr = x + 1;
-    }
-
-    return 0;
 }

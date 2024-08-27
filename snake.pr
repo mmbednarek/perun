@@ -1,3 +1,8 @@
+// Clib functions
+extern fn rand(): i32;
+extern fn malloc(size: i64): rawptr;
+
+// SDL functions and constants
 extern fn SDL_Init(flags: i32): i32;
 extern fn SDL_CreateWindow(title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32): rawptr;
 extern fn SDL_PollEvent(event: rawptr): i32;
@@ -8,89 +13,43 @@ extern fn SDL_Delay(ms: i32);
 extern fn SDL_SetRenderDrawColor(renderer: rawptr, r: i8, g: i8, b: i8, a: i8): i32;
 extern fn SDL_RenderFillRect(renderer: rawptr, rect: rawptr): i32;
 
-extern fn write(fd: i32, buff: rawptr, count: i64): i64;
-extern fn malloc(size: i64): rawptr;
-extern fn free(ptr: rawptr);
-extern fn fsync(fd: i32): i32;
-extern fn strlen(str: rawptr): i64;
-extern fn rand(): i32;
+const SDL_INIT_EVERYTHING = 62001;
+const SDL_WINDOWPOS_CENTERED = 805240832;
 
-// struct SDL_CommonEvent {
-//     event_type: i32,
-//     timestamp: i32,
-// }
+// Perun corelib functions
+fn print(msg: rawptr);
+fn print_int(in_value: i32);
 
-extern fn puts(str: rawptr): i32;
-
-fn int_log10(in_value: i32) : i32 {
-  var x = in_value;
-  var count = 0;
-
-  while x > 0 {
-    x = x / 10;
-    count = count + 1;
-  }
-
-  return count;
-}
-
-fn cast_int_to_string(in_value: i32) : rawptr {
-  var x = in_value;
-
-  var length = int_log10(in_value);
-  var buff = malloc(length + 2);
-  var index = length - 1;
-  var rem = 0;
-
-  if in_value == 0 {
-    length = 1;
-    buff[0] = 48;
-  }
-
-  buff[length] = i8(0);
-
-  while index >= 0 {
-    rem = x % 10;
-    buff[index] = i8(48 + rem);
-    x = x / 10;
-    index = index - 1;
-  }
-
-  return buff;
-}
-
-fn print(msg: rawptr) {
-  write(1, msg, strlen(msg));
-  fsync(1);
-}
-
-fn print_int(in_value: i32) {
-  var str = cast_int_to_string(in_value);
-  print(str);
-  free(str);
-}
-
+const WINDOW_WIDTH = 800;
+const WINDOW_HEIGHT = 600;
 
 fn main() : i32 {
-    if SDL_Init(62001) != 0 {
-        puts("failed to initialize SDL");
+    if SDL_Init(SDL_INIT_EVERYTHING) != 0 {
+        print("failed to initialize SDL\n");
         return 1;
     }
 
-    var wnd_handle = SDL_CreateWindow("Snake Game", 805240832, 805240832, 800, 600, 0);
+    var wnd_handle = SDL_CreateWindow(
+        "Snake Game",
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        0
+    );
+
     var event_ptr = malloc(56);
     var is_running: bool = 1;
     var renderer_handle = SDL_CreateRenderer(wnd_handle, 0-1, 2);
     var rect = malloc(16);
     var snake = malloc(256*16);
     var head: i32 = 2;
-    var index = 0;
-    var speed = 5;
-    var target_x = rand() % (800-32);
-    var target_y = rand() % (600-32);
+    var speed = 2;
+    var target_x = rand() % (WINDOW_WIDTH-32);
+    var target_y = rand() % (WINDOW_HEIGHT-32);
 
     var x = 32;
-    index = 0;
+    var index = 0;
     while index <= head {
         snake[4*index + 0] = x;
         snake[4*index + 1] = 128;
@@ -143,7 +102,7 @@ fn main() : i32 {
             }
         }
 
-        index = 0;
+        var index = 0;
         while index < head {
             var x: i32 = snake[4*index + 0];
             var y: i32 = snake[4*index + 1];
@@ -195,8 +154,9 @@ fn main() : i32 {
         var y: i32 = snake[4*head + 1];
 
         if x < target_x + 32 && x + 32 > target_x && y < target_y + 32 && y + 32 > target_y {
-            target_x = rand() % (800-32);
-            target_y = rand() % (600-32);
+            target_x = rand() % (WINDOW_WIDTH-32);
+            target_y = rand() % (WINDOW_HEIGHT-32);
+            speed = speed + 1;
 
             print("new apple position: ");
             print_int(target_x);
