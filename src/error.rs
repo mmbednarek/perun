@@ -9,14 +9,14 @@ pub struct CompilerError {
 pub type CompilerResult<T> = Result<T, CompilerError>;
 
 pub enum SymbolLookupError {
-    FailedToRegisterSymbol,
+    AlreadyRegistered(String),
     NoSymbolFound(String),
 }
 
 impl SymbolLookupError {
     pub fn message(&self) -> String {
         match self {
-            Self::FailedToRegisterSymbol => "failed to register symbol".to_string(),
+            Self::AlreadyRegistered(sym_name) => format!("symbol {} is already registered in this scope", sym_name),
             Self::NoSymbolFound(sym_name) => format!("symbol not found: {}", sym_name),
         }
     }

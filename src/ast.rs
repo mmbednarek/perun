@@ -369,7 +369,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
                 let func_path = path.sub(&self.name);
                 for (path, sym) in gen.symtable.iterate_path(&func_path) {
                     if sym.sym_type == SymbolType::LocalVariable {
-                        let addr = gen.alloc_var(self.location, &sym.data_type, &sym.name)?;
+                        let addr = gen.alloc_var(sym.location, &sym.data_type, &sym.name)?;
                         gen.addrtable.register_ptr(path.clone(), addr);
                     }
                 }
@@ -387,9 +387,9 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
         let subpath = path.sub(&self.name);
         for (i, param) in self.params.iter().enumerate() {
             types.push(param.arg_type.clone());
-            symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone()});
+            err_with_location(self.location, symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone(), location: self.location}))?;
         }
-        symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()}))});
+        err_with_location(self.location, symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()})), location: self.location}))?;
 
         match &self.scope {
             Some(scope) => {scope.collect_symbols(&subpath, symtable)?; },
@@ -476,7 +476,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         let var_type = self.deduce_type(path, symtable)?;
-        symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::LocalVariable, data_type: var_type});
+        err_with_location(self.location, symtable.add_symbol(path, SymbolInfo{name: self.name.clone(), sym_type: SymbolType::LocalVariable, data_type: var_type, location: self.location}))?;
         Ok(())
     }
 

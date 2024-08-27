@@ -1,6 +1,7 @@
 use std::collections::btree_map::Range;
 use std::collections::BTreeMap;
 use crate::typing::Type;
+use crate::token::Location;
 use crate::error::{SymbolLookupError, SymbolLookupResult};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -15,6 +16,7 @@ pub struct SymbolInfo {
     pub name: String,
     pub sym_type: SymbolType,
     pub data_type: Type,
+    pub location: Location,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -78,8 +80,13 @@ impl SymbolTable {
         Self{symbols: BTreeMap::new()}
     }
 
-    pub fn add_symbol(&mut self, sympath: &SymbolPath, syminfo: SymbolInfo) {
-        self.symbols.insert(sympath.sub(&syminfo.name), syminfo);
+    pub fn add_symbol(&mut self, sympath: &SymbolPath, syminfo: SymbolInfo) -> SymbolLookupResult<()> {
+        let key = sympath.sub(&syminfo.name);
+        if self.symbols.contains_key(&key) {
+            return Err(SymbolLookupError::AlreadyRegistered(syminfo.name));
+        }
+        self.symbols.insert(key, syminfo);
+        Ok(())
     }
 
     pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&SymbolInfo> {
