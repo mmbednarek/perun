@@ -1,3 +1,4 @@
+use std::collections::btree_map::Range;
 use std::collections::BTreeMap;
 use crate::typing::Type;
 use crate::error::{SymbolLookupError, SymbolLookupResult};
@@ -22,8 +23,8 @@ pub struct SymbolPath {
 }
 
 impl SymbolPath {
-    pub fn new() -> Self {
-        Self{path: "root".to_string()}
+    pub fn new(module_name: &str) -> Self {
+        Self{path: module_name.to_string()}
     }
 
     pub fn add_sub(&mut self, name: &str) {
@@ -49,6 +50,12 @@ impl SymbolPath {
         let mut result = self.clone();
         result.truncate_to_parent();
         result
+    }
+
+    pub fn as_range_end(&self) -> Self {
+        let mut res_path = self.path.clone();
+        res_path.push('/');
+        Self{path: res_path}
     }
 
     pub fn is_empty(&self) -> bool {
@@ -105,5 +112,9 @@ impl SymbolTable {
         for (key, value) in &self.symbols {
             println!("SYMBOL {}: {:?}", key, value);
         }
+    }
+
+    pub fn iterate_path(&self, path: &SymbolPath) -> Range<SymbolPath, SymbolInfo> {
+        self.symbols.range(path.clone()..path.as_range_end())
     }
 }

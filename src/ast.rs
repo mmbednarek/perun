@@ -311,12 +311,19 @@ pub struct FunctionArg {
 }
 
 #[derive(Debug)]
+pub enum FunctionLinkage {
+    Standard,
+    External,
+}
+
+#[derive(Debug)]
 pub struct FunctionNode<'ctx, 'st> {
     pub location: Location,
     pub name: String,
     pub params: Vec<FunctionArg>,
-    pub scope: ScopeNode<'ctx, 'st>,
     pub ret_type: Type,
+    pub linkage: FunctionLinkage,
+    pub scope: Option<ScopeNode<'ctx, 'st>>,
 }
 
 impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
@@ -341,60 +348,19 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
             _ => { compiler_err!(self.location, "failed to map llvm type") },
         };
 
-        let function = gen.module.add_function(&self.name, fn_type, Some(Linkage::DLLExport));
-
-        gen.addrtable.register_func(path.sub(&self.name), function);
-
-        self.scope.generate_il(gen, &path.sub(&self.name), &function)?;
-
-        Ok(())
-    }
-
-    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        let mut types = Vec::<Type>::new();
-        let subpath = path.sub(&self.name);
-        for (i, param) in self.params.iter().enumerate() {
-            types.push(param.arg_type.clone());
-            symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone()});
-        }
-        symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()}))});
-
-        self.scope.collect_symbols(&subpath, symtable)
-    }
-}
-
-#[derive(Debug)]
-pub struct ExternFunctionNode {
-    pub location: Location,
-    pub name: String,
-    pub params: Vec<FunctionArg>,
-    pub ret_type: Type,
-}
-
-impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ExternFunctionNode {
-    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath) -> CompilerResult<()> {
-        let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-        for param in &self.params {
-            let llvm_type = wrap_option(self.location, param.arg_type.to_llvm_type(gen.context), "unable to map llvm type")?;
-            match llvm_type {
-                AnyTypeEnum::PointerType(pt) => args.push(pt.into()),
-                AnyTypeEnum::IntType(it) => args.push(it.into()),
-                AnyTypeEnum::FloatType(ft) => args.push(ft.into()),
-                _ => { compiler_err!(self.location, "failed to map llvm type") },
-            }
-        }
-
-        let llvm_ret_type = wrap_option(self.location, self.ret_type.to_llvm_type(gen.context), "unable to map llvm type")?;
-        let fn_type = match llvm_ret_type {
-            AnyTypeEnum::PointerType(pt) => pt.fn_type(&args[..], false),
-            AnyTypeEnum::IntType(it) => it.fn_type(&args[..], false),
-            AnyTypeEnum::FloatType(ft) => ft.fn_type(&args[..], false),
-            AnyTypeEnum::VoidType(ft) => ft.fn_type(&args[..], false),
-            _ => { compiler_err!(self.location, "failed to map llvm type") },
+        let linkage = match self.linkage {
+            FunctionLinkage::Standard => None,
+            FunctionLinkage::External => Some(Linkage::External),
         };
 
-        let function = gen.module.add_function(&self.name, fn_type, Some(Linkage::External));
+        let function = gen.module.add_function(&self.name, fn_type, linkage);
         gen.addrtable.register_func(path.sub(&self.name), function);
+
+        match &self.scope {
+            Some(scope) => { scope.generate_il(gen, &path.sub(&self.name), &function)?; },
+            None => {},
+        }
+
         Ok(())
     }
 
@@ -406,6 +372,12 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ExternFunctionNode {
             symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone()});
         }
         symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::Global, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()}))});
+
+        match &self.scope {
+            Some(scope) => {scope.collect_symbols(&subpath, symtable)?; },
+            None => {},
+        }
+
         Ok(())
     }
 }

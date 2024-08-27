@@ -1,3 +1,5 @@
+use inkwell::module::Linkage;
+
 use crate::token_reader::TokenReader;
 use crate::token::{TokenType, OperatorType, Location, Keyword};
 use crate::error::{CompilerResult, wrap_option};
@@ -121,11 +123,13 @@ where 'st: 'ctx {
             if let TokenType::Keyword(kw) = &token.token_type {
                 match kw {
                     Keyword::Fn => {
-                        let func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location)?);
+                        let func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location, FunctionLinkage::Standard)?);
                         result.body.push(func);
                     },
                     Keyword::Extern => {
-                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_extern(location)?);
+                        self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
+
+                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_function(location, FunctionLinkage::Standard)?);
                         result.body.push(extern_func);
                     },
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
@@ -137,7 +141,7 @@ where 'st: 'ctx {
         Ok(result)
     }
 
-    fn parse_function(&mut self, location: Location) -> CompilerResult<FunctionNode<'ctx, 'st>> {
+    fn parse_function(&mut self, location: Location, linkage: FunctionLinkage) -> CompilerResult<FunctionNode<'ctx, 'st>> {
         let name = self.reader.expect_identifier()?;
         self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
 
@@ -161,84 +165,51 @@ where 'st: 'ctx {
             self.reader.next()?;
         }
 
-        let mut ret_type = Type::Void;
-
-        let token = self.reader.next()?;
-        match token.token_type {
+        let token = self.reader.next()?.clone();
+        let (ret_type, has_scope) = match token.token_type {
             TokenType::Operator(OperatorType::Colon) => {
-                ret_type = self.parse_type()?;
-                self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+                let ret_type = self.parse_type()?;
+                let next_token = self.reader.next()?;
+                match next_token.token_type {
+                    TokenType::Operator(OperatorType::LeftBrace) => (ret_type, true),
+                    TokenType::Operator(OperatorType::Semicolon) => (ret_type, false),
+                    _ => {
+                        compiler_err!(next_token.location, "invalid token {:?}", token.token_type);
+                    }
+                }
             },
-            TokenType::Operator(OperatorType::LeftBrace) => {},
+            TokenType::Operator(OperatorType::LeftBrace) => (Type::Void, true),
+            TokenType::Operator(OperatorType::Semicolon) => (Type::Void, false),
             _ => {
                 compiler_err!(token.location, "invalid token {:?}", token.token_type);
             }
-        }
-
-        let mut scope = self.parse_scope("entry")?;
-
-        let is_last_stmt_ret = match scope.body.last() {
-            Some(stmt) => {
-                match stmt.to_any_statement_node() {
-                    AnyStatementNode::ReturnNode(_) => true,
-                    _ => false,
-                }
-            },
-            None => false,
         };
 
-        if !is_last_stmt_ret {
-            if ret_type != Type::Void {
-                compiler_err!(location, "missing return at the end of function");
-            }
+        let scope = if has_scope {
+            let mut scope_node = self.parse_scope("entry")?;
 
-            scope.body.push(Box::new(ReturnNode{location, expression: None}));
-        }
+            let is_last_stmt_ret = match scope_node.body.last() {
+                Some(stmt) => {
+                    match stmt.to_any_statement_node() {
+                        AnyStatementNode::ReturnNode(_) => true,
+                        _ => false,
+                    }
+                },
+                None => false,
+            };
 
-        Ok(FunctionNode{location, name, params, scope, ret_type})
-    }
-
-    fn parse_extern(&mut self, location: Location) -> CompilerResult<ExternFunctionNode> {
-        self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
-
-        let name = self.reader.expect_identifier()?;
-        self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
-
-        let mut params: Vec<FunctionArg> = Vec::new();
-
-        let peeked_paren = self.reader.peek()?;
-        if peeked_paren.token_type != TokenType::Operator(OperatorType::RightParen) {
-            loop {
-                let arg_name = self.reader.expect_identifier()?;
-                self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
-                let arg_type = self.parse_type()?;
-                params.push(FunctionArg{name: arg_name, arg_type});
-                
-
-                let following = self.reader.next()?;
-                if following.token_type == TokenType::Operator(OperatorType::RightParen) {
-                    break
+            if !is_last_stmt_ret {
+                if ret_type != Type::Void {
+                    compiler_err!(location, "missing return at the end of function");
                 }
+
+                scope_node.body.push(Box::new(ReturnNode{location, expression: None}));
             }
-        } else {
-            self.reader.next()?;
-        }
 
-        let mut ret_type = Type::Void;
+            Some(scope_node)
+        } else { None };
 
-        let token = self.reader.next()?;
-        match token.token_type {
-            TokenType::Operator(OperatorType::Colon) => {
-                ret_type = self.parse_type()?;
-                self.reader.expect_token(TokenType::Operator(OperatorType::Semicolon))?;
-            },
-            TokenType::Operator(OperatorType::Semicolon) => {},
-            _ => {
-                compiler_err!(token.location, "invalid token {:?}", token.token_type);
-            }
-        }
-
-        Ok(ExternFunctionNode{location, name, params, ret_type})
+        Ok(FunctionNode{location, name, params, ret_type, linkage, scope})
     }
 
     fn parse_type(&mut self) -> CompilerResult<Type> {

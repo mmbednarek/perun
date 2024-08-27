@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path};
+use std::{ffi::OsStr, fs::File, path::Path};
 use inkwell::context::Context;
 use clap::Parser as ClapParser;
 
@@ -60,7 +60,8 @@ fn main() -> std::io::Result<()> {
     }
 
     for source in args.sources {
-        let file_handle = File::open(source)?;
+        let source_path = Path::new(source.as_str());
+        let file_handle = File::open(source_path)?;
         let mut lexer = Lexer::new(Box::new(file_handle));
         lexer.read_tokens();
 
@@ -88,8 +89,8 @@ fn main() -> std::io::Result<()> {
             println!("Parsed {:?}", parsed);
         }
 
-
-        let path = SymbolPath::new();
+        let basename = source_path.file_stem().unwrap_or(OsStr::new("root")).to_str().unwrap_or("root");
+        let path = SymbolPath::new(basename);
         let collect_symbols_res = parsed.collect_symbols(&path, &mut sym_table);
         if let Err(err) = &collect_symbols_res {
             eprintln!("Failed to collect symbols (line {}, column {}): {}", err.location.line, err.location.column, err.message);
