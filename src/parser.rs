@@ -1,9 +1,8 @@
-use inkwell::module::Linkage;
 use rand::{distributions::Alphanumeric, Rng};
 
 use crate::token_reader::TokenReader;
 use crate::token::{TokenType, OperatorType, Location, Keyword};
-use crate::error::{CompilerResult, wrap_option};
+use crate::error::{wrap_option, CompilerResult};
 use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
@@ -99,7 +98,7 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
 
     fn build(&mut self) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
         while !self.op_stack.is_empty() {
-            self.process_operator();
+            self.process_operator()?;
         }
 
         if self.expr_stack.len() != 1 {
@@ -145,6 +144,10 @@ where 'st: 'ctx {
                     Keyword::Const => {
                         let const_expr: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_const_decl(location)?);
                         result.body.push(const_expr);
+                    },
+                    Keyword::Struct => {
+                        let struct_node: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> = Box::new(self.parse_struct(location)?);
+                        result.body.push(struct_node);
                     },
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
                 }
@@ -227,11 +230,19 @@ where 'st: 'ctx {
     }
 
     fn parse_type(&mut self) -> CompilerResult<Type> {
-        let (kw_loc, arg_type_kw) = self.reader.expect_keyword_with_loc()?;
-        let arg_type_res = Type::from_keyword(&arg_type_kw);
-        match arg_type_res  {
-            Some(arg_type) => Ok(arg_type),
-            None => compiler_err!(kw_loc, "invalid type {:?}", arg_type_kw),
+        let token = self.reader.next()?;
+        match &token.token_type {
+            TokenType::Keyword(kw) => {
+                let arg_type_res = Type::from_keyword(kw);
+                match arg_type_res  {
+                    Some(arg_type) => Ok(arg_type),
+                    None => compiler_err!(token.location, "invalid type {:?}", kw),
+                }
+            },
+            TokenType::Identifier(iden) => {
+                Ok(Type::Alias(iden.clone()))
+            },
+            _ => { compiler_err!(token.location, "invalid token {:?}", token.token_type) }
         }
     }
 
@@ -273,18 +284,42 @@ where 'st: 'ctx {
                 },
                 Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
-                    let token = self.reader.next()?;
+
+                    let peek_colon = self.reader.peek()?;
 
                     let mut var_type: Option<Type> = None;
-                    if token.token_type == TokenType::Operator(OperatorType::Colon) {
+                    if peek_colon.token_type == TokenType::Operator(OperatorType::Colon) {
+                        self.reader.next()?;
                         var_type = Some(self.parse_type()?);
-                        self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
-                    } else if token.token_type != TokenType::Operator(OperatorType::Equals) {
-                        compiler_err!(location, "expected equal sign");
+                    }
+                    
+                    let mut expression: Option<ExpressionBox<'ctx, 'st>> = None;
+                    let peek_value = self.reader.peek()?;
+                    if peek_value.token_type == TokenType::Operator(OperatorType::Equals) {
+                        self.reader.next()?;
+                        expression = Some(self.parse_expression(OperatorType::Semicolon)?);
+                    } else {
+                        self.reader.expect_token(TokenType::Operator(OperatorType::Semicolon))?;
                     }
 
-                    let expression = self.parse_expression(OperatorType::Semicolon)?;
                     return Ok(Box::new(VarDeclNode{location, name, expression, var_type}));
+                },
+                Keyword::Ref => {
+                    let name = self.reader.expect_identifier()?;
+
+                    let peek_colon = self.reader.peek()?;
+
+                    let mut var_type: Option<Type> = None;
+                    if peek_colon.token_type == TokenType::Operator(OperatorType::Colon) {
+                        self.reader.next()?;
+                        var_type = Some(self.parse_type()?);
+                    }
+
+                    self.reader.expect_token(TokenType::Operator(OperatorType::Equals))?;
+                    
+                    let expression = self.parse_expression(OperatorType::Semicolon)?;
+
+                    return Ok(Box::new(RefDeclNode{location, name, expression, var_type}));
                 },
                 Keyword::If => {
                     return Ok(Box::new(self.parse_if_statement(location)?));
@@ -355,6 +390,10 @@ where 'st: 'ctx {
                         self.reader.next()?;
                         let expr = self.parse_expression(OperatorType::RightSquare)?;
                         builder.push_expr(GetElementNode{location: token.location, object: Box::new(IdentifierNode{location: token.location, name: value.to_string()}), index: expr});
+                    } else if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
+                        self.reader.next()?;
+                        let field_name = self.reader.expect_identifier()?;
+                        builder.push_expr(GetFieldNode{location: token.location, object_expr: Box::new(IdentifierNode{location: token.location, name: value.to_string()}), field_name});
                     } else {
                         builder.push_expr(IdentifierNode{location: token.location, name: value.to_string()});
                     }
@@ -417,5 +456,29 @@ where 'st: 'ctx {
         let value = self.parse_expression(OperatorType::Semicolon)?;
 
         Ok(ConstDeclNode{location, name, const_type, value})
+    }
+
+    fn parse_struct(&mut self, location: Location) -> CompilerResult<StructNode> {
+        let name = self.reader.expect_identifier()?;
+        self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+
+        let mut fields = Vec::new();
+        loop {
+            let peek = self.reader.peek()?.clone();
+            if peek.token_type == TokenType::Operator(OperatorType::RightBrace) {
+                break;
+            }
+
+            let field_name = self.reader.expect_identifier()?;
+            self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
+
+            let field_type = self.parse_type()?;
+
+            fields.push(StructField{location: peek.location, name: field_name, field_type});
+
+            self.reader.skip_token_if_present(TokenType::Operator(OperatorType::Comma))?;
+        }
+
+        Ok(StructNode{location, name, fields})
     }
 }

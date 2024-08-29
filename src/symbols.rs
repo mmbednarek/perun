@@ -6,9 +6,13 @@ use crate::error::{SymbolLookupError, SymbolLookupResult};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SymbolType {
-    Global,
+    FunctionDef,
+    ConstantDef,
+    TypeDef,
     FunctionArg(usize),
+    StructField(usize),
     LocalVariable,
+    LocalReference,
 }
 
 #[derive(Debug)]
@@ -89,6 +93,20 @@ impl SymbolTable {
         Ok(())
     }
 
+    pub fn find_symbol_path(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<SymbolPath> {
+        let mut path = lookup_path.clone();
+
+        while !path.is_empty() {
+            let subpath = path.sub(name);
+            if self.symbols.contains_key(&subpath) {
+                return Ok(subpath);
+            }
+            path.truncate_to_parent();
+        }
+
+        Err(SymbolLookupError::NoSymbolFound(name.to_string()))
+    }
+
     pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&SymbolInfo> {
         let mut path = lookup_path.clone();
 
@@ -123,5 +141,15 @@ impl SymbolTable {
 
     pub fn iterate_path(&self, path: &SymbolPath) -> Range<SymbolPath, SymbolInfo> {
         self.symbols.range(path.clone()..path.as_range_end())
+    }
+
+    pub fn resolve_type_alias(&self, path: &SymbolPath, in_type: Type) -> SymbolLookupResult<Type> {
+        match in_type {
+            Type::Alias(alias) => {
+                let symbol = self.find_symbol(path, &alias)?;
+                Ok(symbol.data_type.clone())
+            },
+            tp => Ok(tp),
+        }
     }
 }

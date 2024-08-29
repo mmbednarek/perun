@@ -56,6 +56,16 @@ impl<'a> TokenReader<'a> {
         compiler_err!(token.location, "invalid token type {:?}, expected Identifier", token.token_type)
     }
 
+    pub fn skip_token_if_present(&mut self, token_to_skip: TokenType) -> CompilerResult<bool> {
+        let token = self.peek()?;
+        if token.token_type == token_to_skip {
+            self.next()?;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
     pub fn expect_keyword(&mut self) -> CompilerResult<Keyword> {
         let token = self.next()?;
         if let TokenType::Keyword(kw) = &token.token_type {

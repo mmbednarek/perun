@@ -16,12 +16,48 @@ extern fn SDL_RenderFillRect(renderer: rawptr, rect: rawptr): i32;
 const SDL_INIT_EVERYTHING = 62001;
 const SDL_WINDOWPOS_CENTERED = 805240832;
 
+struct Rect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
+struct KeyboardEvent {
+    event_type: i32,
+    timestamp: i32,
+    windowID: i32,
+    state: i8,
+    repeat: i8,
+    padding2: i8,
+    padding3: i8,
+    keysym: i32,
+}
+
+const KEY_W = 26;
+const KEY_S = 22;
+const KEY_A = 4;
+const KEY_D = 7;
+
+const EVENT_QUIT = 256;
+const EVENT_KEYDOWN = 768;
+
 // Perun corelib functions
 fn print(msg: rawptr);
 fn print_int(in_value: i32);
 
+
+struct SnakeSegment {
+    x: i32,
+    y: i32,
+    motion_x: i32,
+    motion_y: i32,
+}
+
 const WINDOW_WIDTH = 800;
 const WINDOW_HEIGHT = 600;
+const CELL_WIDTH = 32;
+const CELL_HEIGHT = 32;
 
 fn main() : i32 {
     if SDL_Init(SDL_INIT_EVERYTHING) != 0 {
@@ -41,102 +77,92 @@ fn main() : i32 {
     var event_ptr = malloc(56);
     var is_running: bool = 1;
     var renderer_handle = SDL_CreateRenderer(wnd_handle, 0-1, 2);
-    var rect = malloc(16);
+    var rect: Rect;
     var snake = malloc(256*16);
     var head: i32 = 2;
     var speed = 2;
-    var target_x = rand() % (WINDOW_WIDTH-32);
-    var target_y = rand() % (WINDOW_HEIGHT-32);
+    var target_x = rand() % (WINDOW_WIDTH-CELL_WIDTH);
+    var target_y = rand() % (WINDOW_HEIGHT-CELL_HEIGHT);
 
     var x = 32;
     var index = 0;
     while index <= head {
-        snake[4*index + 0] = x;
-        snake[4*index + 1] = 128;
-        snake[4*index + 2] = 0;
-        snake[4*index + 3] = 0;
+        ref segment: SnakeSegment = snake[index];
+        segment.x = x;
+        segment.y = 128;
+        segment.motion_x = 0;
+        segment.motion_y = 0;
 
-        x = x + 32;
+        x = x + CELL_WIDTH;
         index = index + 1;
     }
 
-    rect[2] = i32(32);
-    rect[3] = i32(32);
+    rect.w = CELL_WIDTH;
+    rect.h = CELL_HEIGHT;
 
     while is_running {
         while SDL_PollEvent(event_ptr) {
-            var event_type: i32 = *event_ptr;
+            ref event_type: i32 = *event_ptr;
 
-            if event_type == 256 {
+            if event_type == EVENT_QUIT {
                 is_running = 0;
             }
-            if event_type == 768 {
-                var key_type: i32 = event_ptr[4];
-
-                var motion_x: i32 = snake[4*head + 2];
-                var motion_y: i32 = snake[4*head + 3];
+            if event_type == EVENT_KEYDOWN {
+                ref kb_event: KeyboardEvent = *event_ptr;
+                ref head_seg: SnakeSegment = snake[head];
 
                 // Up Event
-                if key_type == 26 && motion_y <= 0 {
-                    motion_y = 0-speed;
-                    motion_x = 0;
+                if kb_event.keysym == KEY_W && head_seg.motion_y <= 0 {
+                    head_seg.motion_x = 0;
+                    head_seg.motion_y = 0-speed;
                 }
                 // Down Event
-                if key_type == 22 && motion_y >= 0 {
-                    motion_y = speed;
-                    motion_x = 0;
+                if kb_event.keysym == KEY_S && head_seg.motion_y >= 0 {
+                    head_seg.motion_x = 0;
+                    head_seg.motion_y = speed;
                 }
                 // Left Event
-                if key_type == 4 && motion_x <= 0 {
-                    motion_y = 0;
-                    motion_x = 0-speed;
+                if kb_event.keysym == KEY_A && head_seg.motion_x <= 0 {
+                    head_seg.motion_x = 0-speed;
+                    head_seg.motion_y = 0;
                 }
                 // Right Event
-                if key_type == 7 && motion_x >= 0 {
-                    motion_y = 0;
-                    motion_x = speed;
+                if kb_event.keysym == KEY_D && head_seg.motion_x >= 0 {
+                    head_seg.motion_x = speed;
+                    head_seg.motion_y = 0;
                 }
-
-                snake[4*head + 2] = motion_x;
-                snake[4*head + 3] = motion_y;
             }
         }
 
         var index = 0;
         while index < head {
-            var x: i32 = snake[4*index + 0];
-            var y: i32 = snake[4*index + 1];
-            var next_x: i32 = snake[4*(index+1) + 0];
-            var next_y: i32 = snake[4*(index+1) + 1];
-            var motion_x: i32 = snake[4*index + 2];
-            var motion_y: i32 = snake[4*index + 3];
-            var next_motion_x: i32 = snake[4*(index+1) + 2];
-            var next_motion_y: i32 = snake[4*(index+1) + 3];
+            ref seg: SnakeSegment = snake[index];
+            ref next_seg: SnakeSegment = snake[index+1];
 
-            if next_motion_x != 0 && (motion_y >= 0 && y >= next_y || motion_y <= 0 && y <= next_y) {
-                if next_motion_x > 0 {
-                    snake[4*index + 0] = next_x-32;
+            if next_seg.motion_x != 0 && (seg.motion_y >= 0 && seg.y >= next_seg.y || seg.motion_y <= 0 && seg.y <= next_seg.y) {
+                if next_seg.motion_x > 0 {
+                    seg.x = next_seg.x - CELL_WIDTH;
                 }
-                if next_motion_x < 0 {
-                    snake[4*index + 0] = next_x+32;
+                if next_seg.motion_x < 0 {
+                    seg.x = next_seg.x + CELL_WIDTH;
                 }
-                snake[4*index + 1] = next_y;
-                snake[4*index + 2] = next_motion_x;
-                snake[4*index + 3] = next_motion_y;
+                seg.y = next_seg.y;
+                seg.motion_x = next_seg.motion_x;
+                seg.motion_y = next_seg.motion_y;
             }
 
-            if next_motion_y != 0 && (motion_x >= 0 && x >= next_x || motion_x <= 0 && x <= next_x) {
-                snake[4*index + 0] = next_x;
+            if next_seg.motion_y != 0 && (seg.motion_x >= 0 && seg.x >= next_seg.x || seg.motion_x <= 0 && seg.x <= next_seg.x) {
+                seg.x = next_seg.x;
 
-                if next_motion_y > 0 {
-                    snake[4*index + 1] = next_y-32;
+                if next_seg.motion_y > 0 {
+                    seg.y = next_seg.y - CELL_HEIGHT;
                 }
-                if next_motion_y < 0 {
-                    snake[4*index + 1] = next_y+32;
+                if next_seg.motion_y < 0 {
+                    seg.y = next_seg.y + CELL_HEIGHT;
                 }
 
-                snake[4*index + 2] = next_motion_x;
-                snake[4*index + 3] = next_motion_y;
+                seg.motion_x = next_seg.motion_x;
+                seg.motion_y = next_seg.motion_y;
             }
 
             index = index + 1;
@@ -144,16 +170,20 @@ fn main() : i32 {
 
         index = 0;
         while index <= head {
-            snake[4*index] = i32(snake[4*index]) + i32(snake[4*index + 2]);
-            snake[4*index + 1] = i32(snake[4*index + 1]) + i32(snake[4*index + 3]);
+            ref seg: SnakeSegment = snake[index];
+            seg.x = seg.x + seg.motion_x;
+            seg.y = seg.y + seg.motion_y;
             index = index + 1;
         }
 
         // Check if reached target AABB
-        var x: i32 = snake[4*head];
-        var y: i32 = snake[4*head + 1];
+        ref head_seg: SnakeSegment = snake[head];
 
-        if x < target_x + 32 && x + 32 > target_x && y < target_y + 32 && y + 32 > target_y {
+        if head_seg.x < target_x + CELL_WIDTH &&
+           head_seg.x + CELL_WIDTH > target_x &&
+           head_seg.y < target_y + CELL_HEIGHT &&
+           head_seg.y + CELL_HEIGHT > target_y
+        {
             target_x = rand() % (WINDOW_WIDTH-32);
             target_y = rand() % (WINDOW_HEIGHT-32);
             speed = speed + 1;
@@ -166,10 +196,11 @@ fn main() : i32 {
 
             if head < 255 {
                 head = head + 1;
-                snake[4*head] = i32(snake[4*(head-1)]);
-                snake[4*head + 1] = i32(snake[4*(head-1) + 1]);
-                snake[4*head + 2] = i32(snake[4*(head-1) + 2]);
-                snake[4*head + 3] = i32(snake[4*(head-1) + 3]);
+                ref new_head_seg: SnakeSegment = snake[head];
+                new_head_seg.x = head_seg.x;
+                new_head_seg.y = head_seg.y;
+                new_head_seg.motion_x = head_seg.motion_x;
+                new_head_seg.motion_y = head_seg.motion_y;
             }
         }
 
@@ -179,16 +210,17 @@ fn main() : i32 {
 
         index = 0;
         while index <= head {
-            rect[0] = i32(snake[4*index]);
-            rect[1] = i32(snake[4*index + 1]);
-            SDL_RenderFillRect(renderer_handle, rect);
+            ref seg: SnakeSegment = snake[index];
+            rect.x = seg.x;
+            rect.y = seg.y;
+            SDL_RenderFillRect(renderer_handle, &rect);
             index = index + 1;
         }
 
         SDL_SetRenderDrawColor(renderer_handle, 0, 255, 0, 255);
-        rect[0] = target_x;
-        rect[1] = target_y;
-        SDL_RenderFillRect(renderer_handle, rect);
+        rect.x = target_x;
+        rect.y = target_y;
+        SDL_RenderFillRect(renderer_handle, &rect);
 
         SDL_SetRenderDrawColor(renderer_handle, 0, 0, 0, 255);
 

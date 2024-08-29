@@ -84,8 +84,8 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
         visit_type!(location, self.context, var_type, value, self.builder.build_alloca(value, name))
     }
 
-    pub fn build_get_element_ptr(&self, location: Location, ptr_type: &Type, ptr: PointerValue<'ctx>, index: IntValue<'ctx>, name: &str) -> CompilerResult<PointerValue<'ctx>> {
-        visit_type!(location, self.context, ptr_type, value, unsafe{ self.builder.build_gep(value, ptr, &[index], name) })
+    pub fn build_get_element_ptr(&self, location: Location, ptr_type: &Type, ptr: PointerValue<'ctx>, indicies: &[IntValue<'ctx>], name: &str) -> CompilerResult<PointerValue<'ctx>> {
+        visit_type!(location, self.context, ptr_type, value, unsafe{ self.builder.build_gep(value, ptr, indicies, name) })
     }
 
     pub fn build_sext(&self, location: Location, target_type: &Type, int_value: IntValue<'ctx>, name: &str) -> CompilerResult<IntValue<'ctx>> {

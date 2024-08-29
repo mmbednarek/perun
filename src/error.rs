@@ -36,9 +36,14 @@ macro_rules! compiler_err {
 }
 
 pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str)  -> CompilerResult<T> {
+    if res.is_none() {
+        println!("ERROR!");
+    }
     match res {
         Some(value) => Ok(value),
-        None => compiler_err!(loc, "{}", msg),
+        None => {
+            compiler_err!(loc, "{}", msg);
+        },
     }
 }
 

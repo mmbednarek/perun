@@ -124,6 +124,8 @@ pub enum Keyword {
     Float64,
     Bool,
     Const,
+    Struct,
+    Ref,
 }
 
 impl Keyword {
@@ -145,6 +147,8 @@ impl Keyword {
             "f64" => Some(Keyword::Float64),
             "bool" => Some(Keyword::Bool),
             "const" => Some(Keyword::Const),
+            "struct" => Some(Keyword::Struct),
+            "ref" => Some(Keyword::Ref),
             _ => None,
         }
     }
