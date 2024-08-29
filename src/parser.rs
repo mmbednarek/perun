@@ -47,9 +47,11 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
         let op = op_res.unwrap();
 
         let mut last_op = self.last_op();
-        while last_op.proceeds(&op) {
-            self.process_operator()?;
-            last_op = self.last_op();
+        if !self.last_is_op {
+            while last_op.proceeds(&op) {
+                self.process_operator()?;
+                last_op = self.last_op();
+            }
         }
         self.op_stack.push(op);
         self.last_is_op = true;
@@ -167,10 +169,11 @@ where 'st: 'ctx {
         let peeked_paren = self.reader.peek()?;
         if peeked_paren.token_type != TokenType::Operator(OperatorType::RightParen) {
             loop {
-                let arg_name = self.reader.expect_identifier()?;
+                let is_ref = self.reader.skip_token_if_present(TokenType::Keyword(Keyword::Ref))?;
+                let (arg_loc, arg_name) = self.reader.expect_identifier_with_loc()?;
                 self.reader.expect_token(TokenType::Operator(OperatorType::Colon))?;
                 let arg_type = self.parse_type()?;
-                params.push(FunctionArg{name: arg_name, arg_type});
+                params.push(FunctionArg{location: arg_loc, name: arg_name, arg_type, is_ref});
                 
 
                 let following = self.reader.next()?;
@@ -399,10 +402,14 @@ where 'st: 'ctx {
                     }
                 },
                 TokenType::Keyword(kw) => {
-                    let cast_type = wrap_option(token.location, Type::from_keyword(kw), "unexpected keyword")?;
-                    self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
-                    let expr = self.parse_expression(OperatorType::RightParen)?;
-                    builder.push_expr(CastNode{location: token.location, target_type: cast_type, expr});
+                    if *kw == Keyword::Null {
+                        builder.push_expr(NullNode{location: token.location});
+                    } else {
+                        let cast_type = wrap_option(token.location, Type::from_keyword(kw), "unexpected keyword")?;
+                        self.reader.expect_token(TokenType::Operator(OperatorType::LeftParen))?;
+                        let expr = self.parse_expression(OperatorType::RightParen)?;
+                        builder.push_expr(CastNode{location: token.location, target_type: cast_type, expr});
+                    }
                 },
                 TokenType::String(str) => {
                     builder.push_expr(StringNode{location: token.location, value: str.to_string()});

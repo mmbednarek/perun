@@ -76,7 +76,7 @@ fn main() : i32 {
 
     var event_ptr = malloc(56);
     var is_running: bool = 1;
-    var renderer_handle = SDL_CreateRenderer(wnd_handle, 0-1, 2);
+    var renderer_handle = SDL_CreateRenderer(wnd_handle, -1, 2);
     var rect: Rect;
     var snake = malloc(256*16);
     var head: i32 = 2;
@@ -114,7 +114,7 @@ fn main() : i32 {
                 // Up Event
                 if kb_event.keysym == KEY_W && head_seg.motion_y <= 0 {
                     head_seg.motion_x = 0;
-                    head_seg.motion_y = 0-speed;
+                    head_seg.motion_y = -speed;
                 }
                 // Down Event
                 if kb_event.keysym == KEY_S && head_seg.motion_y >= 0 {
@@ -123,7 +123,7 @@ fn main() : i32 {
                 }
                 // Left Event
                 if kb_event.keysym == KEY_A && head_seg.motion_x <= 0 {
-                    head_seg.motion_x = 0-speed;
+                    head_seg.motion_x = -speed;
                     head_seg.motion_y = 0;
                 }
                 // Right Event

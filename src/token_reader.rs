@@ -48,9 +48,14 @@ impl<'a> TokenReader<'a> {
     }
 
     pub fn expect_identifier(&mut self) -> CompilerResult<String> {
+        let (_, iden) = self.expect_identifier_with_loc()?;
+        Ok(iden)
+    }
+
+    pub fn expect_identifier_with_loc(&mut self) -> CompilerResult<(Location, String)> {
         let token = self.next()?;
         if let TokenType::Identifier(identifier) = &token.token_type {
-            return Ok(identifier.clone());
+            return Ok((token.location, identifier.clone()));
         }
 
         compiler_err!(token.location, "invalid token type {:?}, expected Identifier", token.token_type)

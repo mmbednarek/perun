@@ -1,0 +1,152 @@
+extern fn malloc(size: i64): rawptr;
+extern fn free(ptr: rawptr);
+
+// Perun corelib functions
+fn print(msg: rawptr);
+fn print_int(in_value: i32);
+
+struct LLNode {
+    value: i32,
+    next: rawptr,
+}
+
+struct LinkedList {
+    head: rawptr,
+    count: i32,
+}
+
+fn ll_init(ref ll: LinkedList) {
+    ll.head = null;
+    ll.count = 0;
+}
+
+fn ll_add_item(ref ll: LinkedList, value: i32) {
+    var node = &ll.head;
+    while *node != null {
+        ref node_ref: LLNode = **node;
+        node = &node_ref.next;
+    }
+
+    *node = malloc(16);
+    ref added_node: LLNode = **node;
+    added_node.value = value;
+    added_node.next = null;
+
+    ll.count = ll.count + 1;
+}
+
+fn ll_add_item_at(ref ll: LinkedList, target_index: i32, value: i32) {
+    var node = &ll.head;
+    var index = 0;
+    while *node != null && index < target_index {
+        ref node_ref: LLNode = **node;
+        node = &node_ref.next;
+        index = index + 1;
+    }
+
+    var old_node: rawptr = *node;
+
+    *node = malloc(16);
+    ref added_node: LLNode = **node;
+    added_node.value = value;
+    added_node.next = old_node;
+
+    ll.count = ll.count + 1;
+}
+
+fn ll_remove_item(ref ll: LinkedList, target_index: i32) {
+    var index = 0;
+    var node = &ll.head;
+    while *node != null && index < target_index {
+        ref node_ref: LLNode = **node;
+        node = &node_ref.next;
+        index = index + 1;
+    }
+
+    var old_node: rawptr = *node;
+
+    ref prev_node: LLNode = **node;
+    *node = prev_node.next;
+
+    if old_node != null {
+        free(old_node);
+    }
+
+    ll.count = ll.count - 1;
+}
+
+fn ll_get_item(ref ll: LinkedList, target_index: i32) : i32 {
+    var index = 0;
+    var node = ll.head;
+    while node != null && index < target_index {
+        ref node_ref: LLNode = *node;
+        node = node_ref.next;
+        index = index + 1;
+    }
+
+    if node == null {
+        return 0;
+    }
+
+    ref target_node: LLNode = *node;
+    return target_node.value;
+}
+
+fn ll_print_items(ref ll: LinkedList) {
+    var index = 0;
+    while index < ll.count {
+        var value = ll_get_item(ll, index);
+        print_int(index);
+        print(". ");
+        print_int(value);
+        print("\n");
+
+
+        index = index + 1;
+    }
+}
+
+fn ll_dispose(ref ll: LinkedList) {
+    var index = ll.count - 1;
+    while index >= 0 {
+        ll_remove_item(ll, index);
+        index = index - 1;
+    }
+}
+
+fn main() : i32 {
+    var linked_list: LinkedList;
+    ll_init(linked_list);
+
+    // Add Items
+    ll_add_item(linked_list, 2);
+    ll_add_item(linked_list, 3);
+    ll_add_item(linked_list, 5);
+    ll_add_item(linked_list, 8);
+
+    print("Items\n");
+    ll_print_items(linked_list);
+
+    ll_remove_item(linked_list, 2);
+
+    print("Removed 2nd element\n");
+    ll_print_items(linked_list);
+
+    ll_add_item(linked_list, 10);
+
+    print("Added element at end\n");
+    ll_print_items(linked_list);
+
+    ll_add_item_at(linked_list, 1, 6);
+
+    print("Added element at index 1\n");
+    ll_print_items(linked_list);
+
+    ll_dispose(linked_list);
+
+    print("Item count after disposal: ");
+    print_int(linked_list.count);
+    print("\n");
+
+    return 0;
+}

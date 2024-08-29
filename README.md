@@ -14,3 +14,18 @@ fn main() : i32 {
     return 0;
 }
 ```
+
+To compile it enter the following commands:
+```bash
+$ perun hello.pr -o hello.o
+$ gcc hello.o -o hello
+
+```
+
+And you can run it with:
+```bash
+$ ./hello
+Hello World
+```
+
+To learn the general syntax please check the examples.

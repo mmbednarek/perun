@@ -3,8 +3,14 @@ use inkwell::types::{AnyTypeEnum, BasicTypeEnum, AnyType};
 use inkwell::context::Context;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuncTypeArg<T> {
+    pub is_ref: bool,
+    pub arg_type: T,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncType<T> {
-    pub args: Vec<T>,
+    pub args: Vec<FuncTypeArg<T>>,
     pub ret_type: T,
 }
 
@@ -87,6 +93,13 @@ impl Type {
             Type::Int32 => true,
             Type::Int64 => true,
             Type::Bool => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_ptr_type(&self) -> bool {
+        match self {
+            Type::RawPtr => true,
             _ => false,
         }
     }

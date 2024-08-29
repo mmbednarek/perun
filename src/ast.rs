@@ -2,14 +2,14 @@ use crate::ilgen::{IlGenerator, basic_value_to_int, basic_value_to_ptr};
 use crate::symbols::{SymbolPath, SymbolTable, SymbolInfo, SymbolType};
 use crate::error::{CompilerResult, wrap_option, wrap_err, err_with_location};
 use crate::token::{Location, OperatorType};
-use crate::typing::{FuncType, StructType, Type, ValueType};
+use crate::typing::{FuncType, FuncTypeArg, StructType, Type, ValueType};
 use crate::{visit_type, visit_any_type};
 
 use inkwell::module::Linkage;
-use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum};
+use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicType};
 use inkwell::values::{FunctionValue, BasicValue, BasicMetadataValueEnum};
 use inkwell::basic_block::BasicBlock;
-use inkwell::IntPredicate;
+use inkwell::{AddressSpace, IntPredicate};
 use either::Either;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -108,20 +108,24 @@ impl BinaryOperation {
         self.proceedence() >= other.proceedence()
     }
 
-    pub fn build<'ctx, 'st>(&self, gen: &mut IlGenerator<'ctx, 'st>, location: &Location, data_type: &Type, lhs: &dyn BasicValue<'ctx>, rhs: &dyn BasicValue<'ctx>) -> CompilerResult<BasicValueBox<'ctx>> {
+    pub fn build<'ctx, 'st>(&self, gen: &mut IlGenerator<'ctx, 'st>, location: &Location, operand_type: &Type, lhs: &dyn BasicValue<'ctx>, rhs: &dyn BasicValue<'ctx>) -> CompilerResult<BasicValueBox<'ctx>> {
         if *self == BinaryOperation::Assign {
             let lhs_ptr = basic_value_to_ptr(*location, lhs)?;
 
-            if data_type.is_int_type() {
+            if operand_type.is_int_type() {
                 let rhs_int = basic_value_to_int(*location, rhs)?;
                 wrap_err(*location, gen.builder.build_store(lhs_ptr, rhs_int))?;
+                return Ok(Box::new(lhs_ptr));
+            } else if operand_type.is_ptr_type() {
+                let rhs_ptr = basic_value_to_ptr(*location, rhs)?;
+                wrap_err(*location, gen.builder.build_store(lhs_ptr, rhs_ptr))?;
                 return Ok(Box::new(lhs_ptr));
             }
 
             compiler_err!(*location, "undefined operation");
         }
 
-        if data_type.is_int_type() {
+        if operand_type.is_int_type() {
             let lhs_int = basic_value_to_int(*location, lhs)?;
             let rhs_int = basic_value_to_int(*location, rhs)?;
 
@@ -149,6 +153,15 @@ impl BinaryOperation {
                     }
                 },
             };
+        } else if operand_type.is_ptr_type() {
+            let lhs_ptr = basic_value_to_ptr(*location, lhs)?;
+            let rhs_ptr = basic_value_to_ptr(*location, rhs)?;
+
+            if let Some(predicate) = self.to_llvm_int_predicate() {
+                return Ok(Box::new(wrap_err(*location, gen.builder.build_int_compare(predicate, lhs_ptr, rhs_ptr, "pred"))?));
+            } else {
+                compiler_err!(*location, "invalid operation");
+            }
         }
 
         compiler_err!(*location, "invalid type");
@@ -160,6 +173,7 @@ pub enum SingularOperation {
     AddressOf,
     Deference,
     Not,
+    Minus,
 }
 
 impl SingularOperation {
@@ -168,6 +182,7 @@ impl SingularOperation {
             OperatorType::Ampersand => Some(SingularOperation::AddressOf),
             OperatorType::Asterisk => Some(SingularOperation::Deference),
             OperatorType::Not => Some(SingularOperation::Not),
+            OperatorType::Minus => Some(SingularOperation::Minus),
             _ => None
         }
     }
@@ -237,7 +252,7 @@ pub trait ExpressionNode<'ctx, 'st> : std::fmt::Debug {
         if *value_type == ValueType::LValue {
             Ok(stmt)
         } else {
-            let deduced_type = self.deduce_type(&gen.symtable, path, &Type::Bool)?;
+            let deduced_type = self.deduce_type(&gen.symtable, path, expected_type)?;
             gen.build_cast(*self.get_location(), &deduced_type, expected_type, stmt)
         }
     }
@@ -344,8 +359,10 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ConstDeclNode<'ctx, 'st> {
 
 #[derive(Debug)]
 pub struct FunctionArg {
+    pub location: Location,
     pub name: String,
     pub arg_type: Type,
+    pub is_ref: bool,
 }
 
 #[derive(Debug)]
@@ -368,7 +385,11 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath) -> CompilerResult<()> {
         let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         for param in &self.params {
-            visit_type!(self.location, gen.context, &param.arg_type, value, Ok(args.push(value.into())))?;
+            if param.is_ref {
+                args.push(gen.context.ptr_type(AddressSpace::from(0)).into());
+            } else {
+                visit_type!(param.location, gen.context, &param.arg_type, value, Ok(args.push(value.into())))?;
+            }
         }
 
         let fn_type = visit_any_type!(self.location, gen.context, &self.ret_type, value, Ok(value.fn_type(&args[..], false)))?;
@@ -411,11 +432,11 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        let mut types = Vec::<Type>::new();
+        let mut types = Vec::<FuncTypeArg<Type>>::new();
         let subpath = path.sub(&self.name);
         for (i, param) in self.params.iter().enumerate() {
-            types.push(param.arg_type.clone());
-            err_with_location(self.location, symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i), data_type: param.arg_type.clone(), location: self.location}))?;
+            types.push(FuncTypeArg{is_ref: param.is_ref, arg_type: param.arg_type.clone()});
+            err_with_location(self.location, symtable.add_symbol(&subpath, SymbolInfo{name: param.name.to_string(), sym_type: SymbolType::FunctionArg(i, param.is_ref), data_type: param.arg_type.clone(), location: self.location}))?;
         }
         err_with_location(self.location, symtable.add_symbol(path, SymbolInfo{name: self.name.to_string(), sym_type: SymbolType::FunctionDef, data_type: Type::Function(Box::new(FuncType{args: types, ret_type: self.ret_type.clone()})), location: self.location}))?;
 
@@ -698,9 +719,19 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, _: &Type, value_type: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
         let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
         match symbol.sym_type {
-            SymbolType::FunctionArg(index) => {
-                Ok(Box::new(wrap_option(self.location, function.get_nth_param(index as u32), "invalid function argument")?))
-            }
+            SymbolType::FunctionArg(index, is_ref) => {
+                let arg_expr = wrap_option(symbol.location, function.get_nth_param(index as u32), "invalid function argument")?;
+                if is_ref {
+                    let arg_ptr = basic_value_to_ptr(symbol.location, &arg_expr)?;
+                    match *value_type {
+                        ValueType::LValue => Ok(Box::new(arg_ptr)),
+                        ValueType::RValue => Ok(Box::new(gen.load_var(self.location, &symbol.data_type, &arg_ptr, self.name.as_ref())?)),
+                        ValueType::None => Ok(gen.null_ptr()),
+                    }
+                } else {
+                    Ok(Box::new(arg_expr))
+                }
+            },
             SymbolType::LocalVariable => {
                 let (sym, ptr) = gen.find_symbol_with_addr(self.location, path, self.name.as_ref())?;
                 match *value_type {
@@ -730,6 +761,25 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
     fn deduce_type(&self, symtable: &SymbolTable, path: &SymbolPath, _: &Type) -> CompilerResult<Type> {
         let symbol = err_with_location(self.location, symtable.find_symbol(path, &self.name))?;
         Ok(symbol.data_type.clone())
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+#[derive(Debug)]
+pub struct NullNode {
+    pub location: Location,
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NullNode {
+    fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, _: &SymbolPath, _: &FunctionValue<'ctx>, _: &Type, _: &ValueType) -> CompilerResult<BasicValueBox<'ctx>> {
+        Ok(gen.null_ptr())
+    }
+
+    fn deduce_type(&self, _: &SymbolTable, _: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        Ok(Type::RawPtr)
     }
 
     fn get_location(&self) -> &Location {
@@ -903,12 +953,12 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
         // For assigment we always expect the left hand side to be an l-value.
         let left_value_type = self.deduce_left_value_type();
-        let (operand_type, deduced_type) = self.deduce_operand_and_out_type(&gen.symtable, path, expected_type)?;
+        let (operand_type, _) = self.deduce_operand_and_out_type(&gen.symtable, path, expected_type)?;
 
         let left = self.left.generate_casted(gen, path, function, &operand_type, &left_value_type)?;
         let right = self.right.generate_casted(gen, path, function, &operand_type, &ValueType::RValue)?;
 
-        self.operation.build(gen, &self.location, &deduced_type, left.as_ref(), right.as_ref())
+        self.operation.build(gen, &self.location, &operand_type, left.as_ref(), right.as_ref())
     }
 
     fn generate_boolean(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>, true_block: BasicBlock<'ctx>, false_block: BasicBlock<'ctx>) -> CompilerResult<()> {
@@ -980,6 +1030,12 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
                 let result = wrap_err(self.location, gen.builder.build_xor(expr_int, gen.context.bool_type().const_int(1, false), "not.result"))?;
                 Ok(Box::new(result))
             },
+            SingularOperation::Minus => {
+                let expr_value = self.expr.generate_casted(gen, path, function, expected_type, &ValueType::RValue)?;
+                let expr_int = basic_value_to_int(self.location, expr_value.as_ref())?;
+                let result = wrap_err(self.location, gen.builder.build_int_sub(gen.context.i32_type().const_int(0, false), expr_int, "minus.result"))?;
+                Ok(Box::new(result))
+            },
         }
     }
 
@@ -1006,6 +1062,9 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
             },
             SingularOperation::Not => {
                 Ok(Type::Bool)
+            },
+            SingularOperation::Minus => {
+                Ok(expected_type.clone())
             },
         }
     }
@@ -1037,7 +1096,12 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
             let mut call_args = Vec::<BasicMetadataValueEnum>::new();
             for (i, arg_expr) in self.args.iter().enumerate() {
                 let arg_type = &fn_type.args[i];
-                let arg_value = arg_expr.generate_il(gen, path, function, arg_type, &ValueType::RValue)?;
+                let arg_value = if arg_type.is_ref {
+                    arg_expr.generate_il(gen, path, function, &arg_type.arg_type, &ValueType::LValue)?
+                } else {
+                    arg_expr.generate_il(gen, path, function, &arg_type.arg_type, &ValueType::RValue)?
+                };
+
                 let arg_value_enum = arg_value.as_basic_value_enum();
                 call_args.push(arg_value_enum.into());
             }

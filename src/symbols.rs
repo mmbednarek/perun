@@ -9,7 +9,7 @@ pub enum SymbolType {
     FunctionDef,
     ConstantDef,
     TypeDef,
-    FunctionArg(usize),
+    FunctionArg(usize, bool),
     StructField(usize),
     LocalVariable,
     LocalReference,

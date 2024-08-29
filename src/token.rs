@@ -126,6 +126,7 @@ pub enum Keyword {
     Const,
     Struct,
     Ref,
+    Null,
 }
 
 impl Keyword {
@@ -149,6 +150,7 @@ impl Keyword {
             "const" => Some(Keyword::Const),
             "struct" => Some(Keyword::Struct),
             "ref" => Some(Keyword::Ref),
+            "null" => Some(Keyword::Null),
             _ => None,
         }
     }
