@@ -111,23 +111,16 @@ fn main() : i32 {
                 ref kb_event: KeyboardEvent = *event_ptr;
                 ref head_seg: SnakeSegment = snake[head];
 
-                // Up Event
                 if kb_event.keysym == KEY_W && head_seg.motion_y <= 0 {
                     head_seg.motion_x = 0;
                     head_seg.motion_y = -speed;
-                }
-                // Down Event
-                if kb_event.keysym == KEY_S && head_seg.motion_y >= 0 {
+                } else if kb_event.keysym == KEY_S && head_seg.motion_y >= 0 {
                     head_seg.motion_x = 0;
                     head_seg.motion_y = speed;
-                }
-                // Left Event
-                if kb_event.keysym == KEY_A && head_seg.motion_x <= 0 {
+                } else if kb_event.keysym == KEY_A && head_seg.motion_x <= 0 {
                     head_seg.motion_x = -speed;
                     head_seg.motion_y = 0;
-                }
-                // Right Event
-                if kb_event.keysym == KEY_D && head_seg.motion_x >= 0 {
+                } else if kb_event.keysym == KEY_D && head_seg.motion_x >= 0 {
                     head_seg.motion_x = speed;
                     head_seg.motion_y = 0;
                 }
@@ -142,22 +135,18 @@ fn main() : i32 {
             if next_seg.motion_x != 0 && (seg.motion_y >= 0 && seg.y >= next_seg.y || seg.motion_y <= 0 && seg.y <= next_seg.y) {
                 if next_seg.motion_x > 0 {
                     seg.x = next_seg.x - CELL_WIDTH;
-                }
-                if next_seg.motion_x < 0 {
+                } else if next_seg.motion_x < 0 {
                     seg.x = next_seg.x + CELL_WIDTH;
                 }
                 seg.y = next_seg.y;
                 seg.motion_x = next_seg.motion_x;
                 seg.motion_y = next_seg.motion_y;
-            }
-
-            if next_seg.motion_y != 0 && (seg.motion_x >= 0 && seg.x >= next_seg.x || seg.motion_x <= 0 && seg.x <= next_seg.x) {
+            } else if next_seg.motion_y != 0 && (seg.motion_x >= 0 && seg.x >= next_seg.x || seg.motion_x <= 0 && seg.x <= next_seg.x) {
                 seg.x = next_seg.x;
 
                 if next_seg.motion_y > 0 {
                     seg.y = next_seg.y - CELL_HEIGHT;
-                }
-                if next_seg.motion_y < 0 {
+                } else if next_seg.motion_y < 0 {
                     seg.y = next_seg.y + CELL_HEIGHT;
                 }
 
@@ -182,8 +171,8 @@ fn main() : i32 {
         if head_seg.x < target_x + CELL_WIDTH &&
            head_seg.x + CELL_WIDTH > target_x &&
            head_seg.y < target_y + CELL_HEIGHT &&
-           head_seg.y + CELL_HEIGHT > target_y
-        {
+           head_seg.y + CELL_HEIGHT > target_y {
+
             target_x = rand() % (WINDOW_WIDTH-32);
             target_y = rand() % (WINDOW_HEIGHT-32);
             speed = speed + 1;

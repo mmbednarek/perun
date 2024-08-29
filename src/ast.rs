@@ -621,20 +621,28 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for RefDeclNode<'ctx, 'st> {
 pub struct IfNode<'ctx, 'st> {
     pub location: Location,
     pub condition: ExpressionBox<'ctx, 'st>,
-    pub iftrue_scope: ScopeNode<'ctx, 'st>,
+    pub then_scope: ScopeNode<'ctx, 'st>,
+    pub else_scope: Option<ScopeNode<'ctx, 'st>>,
 }
 
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     fn generate_il(&self, gen: &mut IlGenerator<'ctx, 'st>, path: &SymbolPath, function: &FunctionValue<'ctx>) -> CompilerResult<()> {
         let current_block = wrap_option(self.location, gen.builder.get_insert_block(), "statement not located in a valid block")?;
 
-        let ifthen = self.iftrue_scope.generate_il(gen, &path.sub(&self.iftrue_scope.name), function)?;
-
+        let ifthen = self.then_scope.generate_il(gen, &path.sub(&self.then_scope.name), function)?;
         let ifend = gen.context.append_basic_block(*function, "if.end");
         wrap_err(self.location, gen.builder.build_unconditional_branch(ifend))?;
 
+        let ifelse = if let Some(else_scope) = &self.else_scope {
+            let scope = else_scope.generate_il(gen, &path.sub(&else_scope.name), function)?;
+            wrap_err(self.location, gen.builder.build_unconditional_branch(ifend))?;
+            scope
+        } else {
+            ifend
+        };
+
         gen.builder.position_at_end(current_block);
-        self.condition.generate_boolean(gen, path, function, ifthen, ifend)?;
+        self.condition.generate_boolean(gen, path, function, ifthen, ifelse)?;
 
         gen.builder.position_at_end(ifend);
 
@@ -642,7 +650,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
-        self.iftrue_scope.collect_symbols(&path.sub(&self.iftrue_scope.name), symtable)?;
+        self.then_scope.collect_symbols(&path.sub(&self.then_scope.name), symtable)?;
         Ok(())
     }
 

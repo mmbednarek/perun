@@ -1,3 +1,13 @@
 fn main() : i32 {
-  return --2;
+  var value = 10;
+  var result: i32;
+  if value == 2 {
+    result = 2;
+  } else if value == 3 {
+    result = 3;
+  } else {
+    result = 4;
+  }
+
+  return result;
 }

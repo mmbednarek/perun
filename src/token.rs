@@ -127,6 +127,7 @@ pub enum Keyword {
     Struct,
     Ref,
     Null,
+    Else,
 }
 
 impl Keyword {
@@ -151,6 +152,7 @@ impl Keyword {
             "struct" => Some(Keyword::Struct),
             "ref" => Some(Keyword::Ref),
             "null" => Some(Keyword::Null),
+            "else" => Some(Keyword::Else),
             _ => None,
         }
     }

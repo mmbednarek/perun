@@ -6,6 +6,7 @@ use crate::error::{wrap_option, CompilerResult};
 use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
+use std::thread::Scope;
 
 fn get_random_identifier(prefix: &str) -> String {
     let random_str: String = rand::thread_rng()
@@ -344,7 +345,23 @@ where 'st: 'ctx {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
         let scope_name = get_random_identifier("if_body");
         let scope = self.parse_scope(&scope_name)?;
-        Ok(IfNode{location, condition: expr, iftrue_scope: scope})
+        
+        let else_peek = self.reader.peek()?;
+        let else_scope = if else_peek.token_type == TokenType::Keyword(Keyword::Else) {
+            self.reader.next()?;
+            let peek_lb = self.reader.peek()?;
+            let scope_name = get_random_identifier("if_else");
+            if peek_lb.token_type == TokenType::Operator(OperatorType::LeftBrace) {
+                self.reader.next()?;
+                Some(self.parse_scope(&scope_name)?)
+            } else {
+                let mut stmts = Vec::new();
+                stmts.push(self.parse_statement()?);
+                Some(ScopeNode{body: stmts, name: scope_name})
+            }
+        } else { None };
+
+        Ok(IfNode{location, condition: expr, then_scope: scope, else_scope})
     }
 
     fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode<'ctx, 'st>> {
