@@ -6,7 +6,6 @@ use crate::error::{wrap_option, CompilerResult};
 use crate::ast::*;
 use crate::typing::Type;
 use std::mem::take;
-use std::thread::Scope;
 
 fn get_random_identifier(prefix: &str) -> String {
     let random_str: String = rand::thread_rng()
@@ -122,7 +121,7 @@ pub struct Parser<'tkn> {
 
 impl<'tkn, 'ctx, 'st> Parser<'tkn> 
 where 'st: 'ctx {
-    pub fn new(reader: &'tkn mut TokenReader<'tkn>) -> Parser {
+    pub fn new(reader: &'tkn mut TokenReader<'tkn>) -> Parser<'tkn> {
         Self{reader}
     }
 

@@ -47,7 +47,16 @@ pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str)  -> CompilerResu
     }
 }
 
+pub trait CompilerResultErrorMapper {
+    type Value;
 
-pub fn wrap_err<T>(loc: Location, res: Result<T, BuilderError>)  -> CompilerResult<T> {
-    res.map_err(|be| CompilerError{message: format!("builder error: {:?}", be), location: loc})
+    fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value>;
+}
+
+impl<T> CompilerResultErrorMapper for Result<T, BuilderError> {
+    type Value = T;
+
+    fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value> {
+        self.map_err(|be| CompilerError{message: format!("builder error: {:?}", be), location: loc})
+    }
 }

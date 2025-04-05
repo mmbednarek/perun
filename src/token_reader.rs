@@ -1,5 +1,5 @@
 use crate::error::CompilerResult;
-use crate::token::{Token, TokenType, Location, Keyword};
+use crate::token::{Token, TokenType, Location};
 
 pub struct TokenReader<'a> {
     tokens: &'a [Token],
@@ -69,23 +69,5 @@ impl<'a> TokenReader<'a> {
         }
 
         Ok(false)
-    }
-
-    pub fn expect_keyword(&mut self) -> CompilerResult<Keyword> {
-        let token = self.next()?;
-        if let TokenType::Keyword(kw) = &token.token_type {
-            return Ok(kw.clone());
-        }
-
-        compiler_err!(token.location, "invalid token type {:?}, expected Keyword", token.token_type)
-    }
-
-    pub fn expect_keyword_with_loc(&mut self) -> CompilerResult<(Location, Keyword)> {
-        let token = self.next()?;
-        if let TokenType::Keyword(kw) = &token.token_type {
-            return Ok((token.location.clone(), kw.clone()));
-        }
-
-        compiler_err!(token.location, "invalid token type {:?}, expected Keyword", token.token_type)
     }
 }

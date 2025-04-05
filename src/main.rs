@@ -29,6 +29,8 @@ use symbols::{SymbolTable, SymbolPath};
 
 mod address_table;
 
+mod llvm_generation;
+
 #[derive(ClapParser, Debug)]
 #[command(name = "Perun Compiler")]
 #[command(version = "0.1")]
@@ -36,7 +38,7 @@ mod address_table;
 struct CliArgs {
     sources: Vec<String>,
 
-    #[arg(short, long, default_value_t=("object.o".to_string()))]
+    #[arg(short, long, default_value_t=("object.o").to_string())]
     output: String,
 
     #[arg(short, long, default_value_t=false)]
@@ -102,7 +104,7 @@ fn main() -> std::io::Result<()> {
         }
 
         let mut generator = IlGenerator::new(&il_context, &sym_table);
-        let generatge_res = parsed.generate_il(&mut generator, &path);
+        let generatge_res = parsed.generate(&mut generator, &path);
         if let Err(err) = &generatge_res {
             eprintln!("Failed to compile input file (line {}, column {}): {}", err.location.line, err.location.column, err.message);
             return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));

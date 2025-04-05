@@ -159,10 +159,10 @@ impl Type {
 macro_rules! visit_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
         match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
-            AnyTypeEnum::PointerType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::IntType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::FloatType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::StructType($y) => wrap_err($loc, $z),
+            AnyTypeEnum::PointerType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::IntType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::FloatType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::StructType($y) => $z.to_comp_res($loc),
             _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
         }
     };
@@ -172,11 +172,11 @@ macro_rules! visit_type {
 macro_rules! visit_any_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
         match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
-            AnyTypeEnum::PointerType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::IntType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::FloatType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::StructType($y) => wrap_err($loc, $z),
-            AnyTypeEnum::VoidType($y) => wrap_err($loc, $z),
+            AnyTypeEnum::PointerType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::IntType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::FloatType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::StructType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::VoidType($y) => $z.to_comp_res($loc),
             _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
         }
     };
