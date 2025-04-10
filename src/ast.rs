@@ -1,5 +1,5 @@
 use crate::error::{CompilerResult, CompilerResultErrorMapper};
-use crate::ilgen::{BasicValueExtension, IlGenerator};
+use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::symbols::{SymbolPath, SymbolTable};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, ValueType};
@@ -156,7 +156,7 @@ pub type BasicValueBox<'ctx> = Box<dyn BasicValue<'ctx> + 'ctx>;
 pub trait GlobalStatementNode<'ctx, 'st>: std::fmt::Debug {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
     ) -> CompilerResult<()>;
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()>;
@@ -165,7 +165,7 @@ pub trait GlobalStatementNode<'ctx, 'st>: std::fmt::Debug {
 pub trait StatementNode<'ctx, 'st>: std::fmt::Debug {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()>;
@@ -176,7 +176,7 @@ pub trait StatementNode<'ctx, 'st>: std::fmt::Debug {
 pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -192,7 +192,7 @@ pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
 
     fn build_boolean_branch(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         true_block: BasicBlock<'ctx>,
@@ -208,7 +208,7 @@ pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
 
     fn generate_boolean(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         true_block: BasicBlock<'ctx>,
@@ -219,7 +219,7 @@ pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
 
     fn generate_casted(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -236,7 +236,7 @@ pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
 
     fn to_constexpr_value(
         &self,
-        _: &mut IlGenerator<'ctx, 'st>,
+        _: &mut IRBuildContext<'ctx, 'st>,
         _: &SymbolPath,
         _: &Type,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
@@ -255,6 +255,17 @@ pub enum AnyStatementNode<'stmt, 'ctx, 'st> {
     IfNode(&'stmt IfNode<'ctx, 'st>),
     WhileNode(&'stmt WhileNode<'ctx, 'st>),
     ExpressionStatementNode(&'stmt ExpressionStatementNode<'ctx, 'st>),
+}
+
+trait StatementVisitor<'ctx, 'st> {
+    type Payload;
+
+    fn visit_return_node(&self, node: &ReturnNode<'ctx, 'st>, pd: &Self::Payload);
+    fn visit_var_decl_node(&self, node: &VarDeclNode<'ctx, 'st>, pd: &Self::Payload);
+    fn visit_ref_decl_node(&self, node: &RefDeclNode<'ctx, 'st>, pd: &Self::Payload);
+    fn visit_if_node(&self, node: &IfNode<'ctx, 'st>, pd: &Self::Payload);
+    fn visit_while_node(&self, node: &WhileNode<'ctx, 'st>, pd: &Self::Payload);
+    fn visit_expression_statement_node(&self, node: &ExpressionStatementNode<'ctx, 'st>, pd: &Self::Payload);
 }
 
 pub type ExpressionBox<'ctx, 'st> = Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>;
@@ -299,6 +310,7 @@ pub enum FunctionLinkage {
 #[derive(Debug)]
 pub struct FunctionNode<'ctx, 'st> {
     pub location: Location,
+    pub self_type: Option<Type>,
     pub name: String,
     pub params: Vec<FunctionArg>,
     pub ret_type: Type,
@@ -318,6 +330,12 @@ pub struct StructNode {
     pub location: Location,
     pub name: String,
     pub fields: Vec<StructField>,
+}
+
+#[derive(Debug)]
+pub struct ImportNode {
+    pub location: Location,
+    pub module_name: String,
 }
 
 // **********************************
@@ -382,6 +400,11 @@ pub struct NullNode {
 }
 
 #[derive(Debug)]
+pub struct SelfNode {
+    pub location: Location,
+}
+
+#[derive(Debug)]
 pub struct NumberNode {
     pub location: Location,
     pub number: u64,
@@ -434,4 +457,12 @@ pub struct GetFieldNode<'ctx, 'st> {
     pub location: Location,
     pub object_expr: ExpressionBox<'ctx, 'st>,
     pub field_name: String,
+}
+
+#[derive(Debug)]
+pub struct MethodCall<'ctx, 'st> {
+    pub location: Location,
+    pub object_expr: ExpressionBox<'ctx, 'st>,
+    pub name: String,
+    pub args: Vec<ExpressionBox<'ctx, 'st>>,
 }

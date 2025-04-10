@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::address_table::AddressTable;
-use crate::error::{err_with_location, wrap_option, CompilerResult, CompilerResultErrorMapper};
+use crate::error::{wrap_option, CompilerResult, CompilerResultErrorMapper};
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::Location;
 use crate::typing::Type;
@@ -20,6 +20,7 @@ type MainFunc = unsafe extern "C" fn() -> i32;
 pub trait BasicValueExtension<'ctx> {
     fn to_int(&self, location: Location) -> CompilerResult<IntValue<'ctx>>;
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>>;
+    fn is_ptr(&self) -> bool;
 }
 
 impl<'ctx> BasicValueExtension<'ctx> for dyn BasicValue<'ctx> + '_ {
@@ -46,6 +47,13 @@ impl<'ctx> BasicValueExtension<'ctx> for dyn BasicValue<'ctx> + '_ {
             );
         }
     }
+
+    fn is_ptr(&self) -> bool {
+        match self.as_basic_value_enum() {
+            BasicValueEnum::PointerValue(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<'ctx> BasicValueExtension<'ctx> for BasicValueEnum<'ctx> {
@@ -56,9 +64,16 @@ impl<'ctx> BasicValueExtension<'ctx> for BasicValueEnum<'ctx> {
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>> {
         (self as &dyn BasicValue<'ctx>).to_ptr(location)
     }
+
+    fn is_ptr(&self) -> bool {
+        match self {
+            BasicValueEnum::PointerValue(_) => true,
+            _ => false,
+        }
+    }
 }
 
-pub struct IlGenerator<'ctx, 'st> {
+pub struct IRBuildContext<'ctx, 'st> {
     pub context: &'ctx Context,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
@@ -68,7 +83,7 @@ pub struct IlGenerator<'ctx, 'st> {
     pub machine: TargetMachine,
 }
 
-impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
+impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
     pub fn new(context: &'ctx Context, symtable: &'st SymbolTable) -> Self {
         let module = context.create_module("output");
         let builder = context.create_builder();
@@ -121,7 +136,7 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
             self.context,
             var_type,
             value,
-            self.builder.build_load(value, *ptr, name)
+            self.builder.build_load(value, *ptr, name).to_comp_res(location)
         )
     }
 
@@ -136,7 +151,7 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
             self.context,
             var_type,
             value,
-            self.builder.build_alloca(value, name)
+            self.builder.build_alloca(value, name).to_comp_res(location)
         )
     }
 
@@ -149,7 +164,7 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
         name: &str,
     ) -> CompilerResult<PointerValue<'ctx>> {
         visit_type!(location, self.context, ptr_type, value, unsafe {
-            self.builder.build_gep(value, ptr, indicies, name)
+            self.builder.build_gep(value, ptr, indicies, name).to_comp_res(location)
         })
     }
 
@@ -205,8 +220,8 @@ impl<'ctx, 'st> IlGenerator<'ctx, 'st> {
         path: &SymbolPath,
         name: &str,
     ) -> CompilerResult<(&SymbolInfo, &PointerValue<'ctx>)> {
-        let sym = err_with_location(location, self.symtable.find_symbol(path, name))?;
-        let ptr = err_with_location(location, self.addrtable.find_symbol(path, name))?;
+        let sym = self.symtable.find_symbol(path, name).to_comp_res(location)?;
+        let ptr = self.addrtable.find_symbol(path, name).to_comp_res(location)?;
         Ok((sym, ptr))
     }
 

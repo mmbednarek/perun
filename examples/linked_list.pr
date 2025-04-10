@@ -15,13 +15,13 @@ struct LinkedList {
     count: i32,
 }
 
-fn ll_init(ref ll: LinkedList) {
-    ll.head = null;
-    ll.count = 0;
+fn LinkedList.init(ref self) {
+    self.head = null;
+    self.count = 0;
 }
 
-fn ll_add_item(ref ll: LinkedList, value: i32) {
-    var node = &ll.head;
+fn LinkedList.add_item(ref self, value: i32) {
+    var node = &self.head;
     while *node != null {
         ref node_ref: LLNode = **node;
         node = &node_ref.next;
@@ -32,11 +32,11 @@ fn ll_add_item(ref ll: LinkedList, value: i32) {
     added_node.value = value;
     added_node.next = null;
 
-    ll.count = ll.count + 1;
+    self.count = self.count + 1;
 }
 
-fn ll_add_item_at(ref ll: LinkedList, target_index: i32, value: i32) {
-    var node = &ll.head;
+fn LinkedList.add_item_at(ref self, target_index: i32, value: i32) {
+    var node = &self.head;
     var index = 0;
     while *node != null && index < target_index {
         ref node_ref: LLNode = **node;
@@ -51,12 +51,12 @@ fn ll_add_item_at(ref ll: LinkedList, target_index: i32, value: i32) {
     added_node.value = value;
     added_node.next = old_node;
 
-    ll.count = ll.count + 1;
+    self.count = self.count + 1;
 }
 
-fn ll_remove_item(ref ll: LinkedList, target_index: i32) {
+fn LinkedList.remove_item(ref self, target_index: i32) {
     var index = 0;
-    var node = &ll.head;
+    var node = &self.head;
     while *node != null && index < target_index {
         ref node_ref: LLNode = **node;
         node = &node_ref.next;
@@ -72,12 +72,12 @@ fn ll_remove_item(ref ll: LinkedList, target_index: i32) {
         free(old_node);
     }
 
-    ll.count = ll.count - 1;
+    self.count = self.count - 1;
 }
 
-fn ll_get_item(ref ll: LinkedList, target_index: i32) : i32 {
+fn LinkedList.get_item(ref self, target_index: i32) : i32 {
     var index = 0;
-    var node = ll.head;
+    var node = self.head;
     while node != null && index < target_index {
         ref node_ref: LLNode = *node;
         node = node_ref.next;
@@ -92,57 +92,56 @@ fn ll_get_item(ref ll: LinkedList, target_index: i32) : i32 {
     return target_node.value;
 }
 
-fn ll_print_items(ref ll: LinkedList) {
+fn LinkedList.print_items(ref self) {
     var index = 0;
-    while index < ll.count {
-        var value = ll_get_item(ll, index);
+    while index < self.count {
+        var value = self.get_item(index);
         print_int(index);
         print(". ");
         print_int(value);
         print("\n");
 
-
         index = index + 1;
     }
 }
 
-fn ll_dispose(ref ll: LinkedList) {
-    var index = ll.count - 1;
+fn LinkedList.dispose(ref self) {
+    var index = self.count - 1;
     while index >= 0 {
-        ll_remove_item(ll, index);
+        self.remove_item(index);
         index = index - 1;
     }
 }
 
 fn main() : i32 {
     var linked_list: LinkedList;
-    ll_init(linked_list);
+    linked_list.init();
 
     // Add Items
-    ll_add_item(linked_list, 2);
-    ll_add_item(linked_list, 3);
-    ll_add_item(linked_list, 5);
-    ll_add_item(linked_list, 8);
+    linked_list.add_item(2);
+    linked_list.add_item(3);
+    linked_list.add_item(5);
+    linked_list.add_item(8);
 
     print("Items\n");
-    ll_print_items(linked_list);
+    linked_list.print_items();
 
-    ll_remove_item(linked_list, 2);
+    linked_list.remove_item(2);
 
     print("Removed 2nd element\n");
-    ll_print_items(linked_list);
+    linked_list.print_items();
 
-    ll_add_item(linked_list, 10);
+    linked_list.add_item(10);
 
     print("Added element at end\n");
-    ll_print_items(linked_list);
+    linked_list.print_items();
 
-    ll_add_item_at(linked_list, 1, 6);
+    linked_list.add_item_at(1, 6);
 
     print("Added element at index 1\n");
-    ll_print_items(linked_list);
+    linked_list.print_items();
 
-    ll_dispose(linked_list);
+    linked_list.dispose();
 
     print("Item count after disposal: ");
     print_int(linked_list.count);

@@ -47,6 +47,20 @@ impl<'a> TokenReader<'a> {
         Ok(token)
     }
 
+    pub fn find_one_of(&mut self, tokens: &[TokenType]) -> CompilerResult<Token> {
+        let pos = self.at;
+        while self.has_tokens() {
+            let token = self.next()?.clone();
+            if tokens.iter().find(|t| **t == token.token_type).is_some() {
+                self.at = pos;
+                return Ok(token);
+            }
+        }
+
+        self.at = pos;
+        compiler_err!(Location{line: 1, column: 1}, "unexpected and of stream")
+    }
+
     pub fn expect_identifier(&mut self) -> CompilerResult<String> {
         let (_, iden) = self.expect_identifier_with_loc()?;
         Ok(iden)
@@ -67,7 +81,16 @@ impl<'a> TokenReader<'a> {
             self.next()?;
             return Ok(true);
         }
-
         Ok(false)
+    }
+
+    pub fn skip_token_if_present_with_loc(&mut self, token_to_skip: TokenType) -> CompilerResult<Option<Location>> {
+        let token = self.peek()?;
+        if token.token_type == token_to_skip {
+            let loc = token.location.clone();
+            self.next()?;
+            return Ok(Some(loc));
+        }
+        Ok(None)
     }
 }

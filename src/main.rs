@@ -21,8 +21,8 @@ mod parser;
 #[macro_use]
 mod typing;
 
-mod ilgen;
-use ilgen::IlGenerator;
+mod ir_build_context;
+use ir_build_context::IRBuildContext;
 
 mod symbols;
 use symbols::{SymbolTable, SymbolPath};
@@ -30,6 +30,8 @@ use symbols::{SymbolTable, SymbolPath};
 mod address_table;
 
 mod llvm_generation;
+
+mod module_api;
 
 #[derive(ClapParser, Debug)]
 #[command(name = "Perun Compiler")]
@@ -88,7 +90,7 @@ fn main() -> std::io::Result<()> {
 
         let parsed = parsed_res.unwrap();
         if args.print_ast {
-            println!("Parsed {:?}", parsed);
+            println!("Parsed {:#?}", parsed);
         }
 
         let basename = source_path.file_stem().unwrap_or(OsStr::new("root")).to_str().unwrap_or("root");
@@ -103,9 +105,9 @@ fn main() -> std::io::Result<()> {
             sym_table.print_symbols();
         }
 
-        let mut generator = IlGenerator::new(&il_context, &sym_table);
-        let generatge_res = parsed.generate(&mut generator, &path);
-        if let Err(err) = &generatge_res {
+        let mut generator = IRBuildContext::new(&il_context, &sym_table);
+        let generate_res = parsed.generate(&mut generator, &path);
+        if let Err(err) = &generate_res {
             eprintln!("Failed to compile input file (line {}, column {}): {}", err.location.line, err.location.column, err.message);
             return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
         }

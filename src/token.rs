@@ -128,6 +128,8 @@ pub enum Keyword {
     Ref,
     Null,
     Else,
+    SelfKw,
+    Import,
 }
 
 impl Keyword {
@@ -153,6 +155,8 @@ impl Keyword {
             "ref" => Some(Keyword::Ref),
             "null" => Some(Keyword::Null),
             "else" => Some(Keyword::Else),
+            "self" => Some(Keyword::SelfKw),
+            "import" => Some(Keyword::Import),
             _ => None,
         }
     }

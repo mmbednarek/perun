@@ -23,5 +23,8 @@ $(BUILD_DIR)/snake: $(BUILD_DIR)/snake.o $(BUILD_DIR)/corelib.o
 $(BUILD_DIR)/linked_list: $(BUILD_DIR)/linked_list.o $(BUILD_DIR)/corelib.o
 	gcc $(BUILD_DIR)/linked_list.o $(BUILD_DIR)/corelib.o -o $(BUILD_DIR)/linked_list
 
+$(BUILD_DIR)/method_test: $(BUILD_DIR)/method_test.o $(BUILD_DIR)/corelib.o
+	gcc $(BUILD_DIR)/method_test.o  $(BUILD_DIR)/corelib.o -o $(BUILD_DIR)/method_test
+
 clean:
 	rm -rf build-dir

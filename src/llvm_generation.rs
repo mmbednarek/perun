@@ -1,21 +1,24 @@
 use crate::ast::*;
-use crate::error::{err_with_location, wrap_option, CompilerResult, CompilerResultErrorMapper};
-use crate::ilgen::{BasicValueExtension, IlGenerator};
+use crate::error::{
+    wrap_option, CompilerError, CompilerResult, CompilerResultErrorMapper,
+    CompilerResultErrorMapperWithDesc,
+};
+use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
 use crate::token::Location;
-use crate::typing::{FuncType, FuncTypeArg, StructType, Type, ValueType};
-use crate::{visit_any_type, visit_type};
+use crate::typing::{FuncType, FuncTypeArg, FuncTypeBox, StructType, Type, ValueType};
+use crate::{module_api, visit_any_type, visit_type};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
 use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, FunctionValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue};
 use inkwell::{AddressSpace, IntPredicate};
 
 impl BinaryOperation {
     pub fn build<'ctx, 'st>(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         location: &Location,
         operand_type: &Type,
         lhs: &dyn BasicValue<'ctx>,
@@ -112,6 +115,10 @@ impl BinaryOperation {
     }
 }
 
+fn create_method_name(receiver: &str, name: &str) -> String {
+    format!("perun.method.{}.{}", receiver, name)
+}
+
 // **********************************
 // ******** GLOBAL STATEMENTS *******
 // **********************************
@@ -119,7 +126,7 @@ impl BinaryOperation {
 impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for SourceUnit<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
     ) -> CompilerResult<()> {
         for stmt in &self.body {
@@ -139,7 +146,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for SourceUnit<'ctx, 'st> {
 impl<'ctx, 'st> ScopeNode<'ctx, 'st> {
     fn generate_il(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<BasicBlock<'ctx>> {
@@ -153,7 +160,7 @@ impl<'ctx, 'st> ScopeNode<'ctx, 'st> {
 
     fn generate_to_current_block(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
@@ -174,7 +181,7 @@ impl<'ctx, 'st> ScopeNode<'ctx, 'st> {
 impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ConstDeclNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
     ) -> CompilerResult<()> {
         let sym_path = path.sub(&self.name);
@@ -193,9 +200,8 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ConstDeclNode<'ctx, 'st> {
             Some(t) => t,
             None => self.value.deduce_type(symtable, path, &Type::Void)?,
         };
-        err_with_location(
-            self.location,
-            symtable.add_symbol(
+        symtable
+            .add_symbol(
                 path,
                 SymbolInfo {
                     name: self.name.clone(),
@@ -203,16 +209,40 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ConstDeclNode<'ctx, 'st> {
                     data_type: expected_type,
                     location: self.location,
                 },
-            ),
-        )?;
+            )
+            .to_comp_res(self.location)?;
         Ok(())
+    }
+}
+
+impl<'ctx, 'st> FunctionNode<'ctx, 'st> {
+    fn sub_path(&self, path: &SymbolPath) -> CompilerResult<SymbolPath> {
+        if let Some(self_type) = &self.self_type {
+            match self_type {
+                Type::Alias(alias) => Ok(path.sub(alias).sub(&self.name)),
+                _ => compiler_err!(self.location, "invalid type"),
+            }
+        } else {
+            Ok(path.sub(&self.name))
+        }
+    }
+
+    fn effective_name(&self) -> CompilerResult<String> {
+        if let Some(self_type) = &self.self_type {
+            match self_type {
+                Type::Alias(alias) => Ok(create_method_name(alias, &self.name)),
+                _ => compiler_err!(self.location, "invalid type"),
+            }
+        } else {
+            Ok(self.name.clone())
+        }
     }
 }
 
 impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
     ) -> CompilerResult<()> {
         let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
@@ -220,10 +250,14 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
             if param.is_ref {
                 args.push(gen.context.ptr_type(AddressSpace::from(0)).into());
             } else {
+                let resolved_type = gen
+                    .symtable
+                    .resolve_type_alias(path, param.arg_type.clone())
+                    .to_comp_res(self.location)?;
                 visit_type!(
                     param.location,
                     gen.context,
-                    &param.arg_type,
+                    &resolved_type,
                     value,
                     Ok(args.push(value.into()))
                 )?;
@@ -243,22 +277,25 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
             FunctionLinkage::External => Some(Linkage::External),
         };
 
-        let function = gen.module.add_function(&self.name, fn_type, linkage);
-        gen.addrtable.register_func(path.sub(&self.name), function);
+        let sub_path = self.sub_path(path)?;
+
+        let function = gen
+            .module
+            .add_function(&self.effective_name()?, fn_type, linkage);
+        gen.addrtable.register_func(sub_path.clone(), function);
 
         match &self.scope {
             Some(scope) => {
                 let basic_block = gen.context.append_basic_block(function, &self.name);
                 gen.builder.position_at_end(basic_block);
 
-                let func_path = path.sub(&self.name);
-                for (path, sym) in gen.symtable.iterate_path(&func_path) {
+                for (path, sym) in gen.symtable.iterate_path(&sub_path) {
                     match sym.sym_type {
                         SymbolType::LocalVariable => {
-                            let resolved_type = err_with_location(
-                                self.location,
-                                gen.symtable.resolve_type_alias(path, sym.data_type.clone()),
-                            )?;
+                            let resolved_type = gen
+                                .symtable
+                                .resolve_type_alias(path, sym.data_type.clone())
+                                .to_comp_res(self.location)?;
                             let addr = gen.alloc_var(sym.location, &resolved_type, &sym.name)?;
                             gen.addrtable.register_ptr(path.clone(), addr);
                         }
@@ -270,7 +307,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
                     }
                 }
 
-                scope.generate_to_current_block(gen, &func_path, &function)?;
+                scope.generate_to_current_block(gen, &sub_path, &function)?;
             }
             None => {}
         }
@@ -280,29 +317,28 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         let mut types = Vec::<FuncTypeArg<Type>>::new();
-        let subpath = path.sub(&self.name);
+        let sub_path = self.sub_path(path)?;
+
         for (i, param) in self.params.iter().enumerate() {
             types.push(FuncTypeArg {
                 is_ref: param.is_ref,
                 arg_type: param.arg_type.clone(),
             });
-            err_with_location(
-                self.location,
-                symtable.add_symbol(
-                    &subpath,
+            symtable
+                .add_symbol(
+                    &sub_path,
                     SymbolInfo {
                         name: param.name.to_string(),
                         sym_type: SymbolType::FunctionArg(i, param.is_ref),
                         data_type: param.arg_type.clone(),
                         location: self.location,
                     },
-                ),
-            )?;
+                )
+                .to_comp_res(self.location)?;
         }
-        err_with_location(
-            self.location,
-            symtable.add_symbol(
-                path,
+        symtable
+            .add_symbol(
+                &sub_path.parent(),
                 SymbolInfo {
                     name: self.name.to_string(),
                     sym_type: SymbolType::FunctionDef,
@@ -312,12 +348,12 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
                     })),
                     location: self.location,
                 },
-            ),
-        )?;
+            )
+            .to_comp_res(self.location)?;
 
         match &self.scope {
             Some(scope) => {
-                scope.collect_symbols(&subpath, symtable)?;
+                scope.collect_symbols(&sub_path, symtable)?;
             }
             None => {}
         }
@@ -327,16 +363,15 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for FunctionNode<'ctx, 'st> {
 }
 
 impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for StructNode {
-    fn generate(&self, _: &mut IlGenerator<'ctx, 'st>, _: &SymbolPath) -> CompilerResult<()> {
+    fn generate(&self, _: &mut IRBuildContext<'ctx, 'st>, _: &SymbolPath) -> CompilerResult<()> {
         Ok(())
     }
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         for (i, field) in self.fields.iter().enumerate() {
             let subpath = path.sub(&self.name);
-            err_with_location(
-                self.location,
-                symtable.add_symbol(
+            symtable
+                .add_symbol(
                     &subpath,
                     SymbolInfo {
                         name: field.name.clone(),
@@ -344,8 +379,8 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for StructNode {
                         data_type: field.field_type.clone(),
                         location: field.location,
                     },
-                ),
-            )?;
+                )
+                .to_comp_res(self.location)?;
         }
 
         let fields: Vec<Type> = self
@@ -360,7 +395,96 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for StructNode {
             data_type: Type::Struct(Box::new(struct_type)),
             location: self.location,
         };
-        err_with_location(self.location, symtable.add_symbol(path, symbol))?;
+        symtable
+            .add_symbol(path, symbol)
+            .to_comp_res(self.location)?;
+        Ok(())
+    }
+}
+
+impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for ImportNode {
+    fn generate(
+        &self,
+        gen: &mut IRBuildContext<'ctx, 'st>,
+        path: &SymbolPath,
+    ) -> CompilerResult<()> {
+        let module = module_api::load_module(&format!("{}.json", self.module_name))
+            .to_comp_res_with_desc(self.location, "unable to load module")?;
+
+        for func in module.functions {
+            let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
+            for arg in &func.args {
+                if arg.is_ref {
+                    args.push(gen.context.ptr_type(AddressSpace::from(0)).into());
+                } else {
+                    let resolved_type = gen
+                        .symtable
+                        .resolve_type_alias(path, Type::from_string(&arg.arg_type))
+                        .to_comp_res(self.location)?;
+                    visit_type!(
+                        self.location,
+                        gen.context,
+                        &resolved_type,
+                        value,
+                        Ok(args.push(value.into()))
+                    )?;
+                }
+            }
+
+            let ret_type = gen
+                .symtable
+                .resolve_type_alias(path, Type::from_string(&func.return_type))
+                .to_comp_res(self.location)?;
+
+            let fn_type = visit_any_type!(
+                self.location,
+                gen.context,
+                &ret_type,
+                value,
+                Ok(value.fn_type(&args[..], false))
+            )?;
+
+            let function =
+                gen.module
+                    .add_function(&func.name, fn_type, Some(Linkage::External));
+            gen.addrtable.register_func(path.sub(&func.name), function);
+        }
+        Ok(())
+    }
+
+    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
+        let module = module_api::load_module(&format!("{}.json", self.module_name))
+            .to_comp_res_with_desc(self.location, "unable to load module")?;
+
+        for func in module.functions {
+            let mut args: Vec<FuncTypeArg<Type>> = Vec::new();
+            for arg in &func.args {
+                args.push(FuncTypeArg {
+                    is_ref: arg.is_ref,
+                    arg_type: Type::from_string(&arg.arg_type),
+                });
+            }
+
+            let ret_type = symtable
+                .resolve_type_alias(path, Type::from_string(&func.return_type))
+                .to_comp_res(self.location)?;
+
+            symtable
+                .add_symbol(
+                    path,
+                    SymbolInfo {
+                        name: func.name.to_string(),
+                        sym_type: SymbolType::FunctionDef,
+                        data_type: Type::Function(Box::new(FuncType {
+                            args,
+                            ret_type,
+                        })),
+                        location: self.location,
+                    },
+                )
+                .to_comp_res(self.location)?;
+        }
+
         Ok(())
     }
 }
@@ -372,7 +496,7 @@ impl<'ctx, 'st> GlobalStatementNode<'ctx, 'st> for StructNode {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for ReturnNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
@@ -432,20 +556,23 @@ impl<'ctx, 'st> VarDeclNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
         if let Some(expr) = &self.expression {
-            let symbol =
-                err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
-            let addr =
-                *err_with_location(self.location, gen.addrtable.find_symbol(path, &self.name))?;
-            let resolved_type = err_with_location(
-                self.location,
-                gen.symtable
-                    .resolve_type_alias(path, symbol.data_type.clone()),
-            )?;
+            let symbol = gen
+                .symtable
+                .find_symbol(path, &self.name)
+                .to_comp_res(self.location)?;
+            let addr = *gen
+                .addrtable
+                .find_symbol(path, &self.name)
+                .to_comp_res(self.location)?;
+            let resolved_type = gen
+                .symtable
+                .resolve_type_alias(path, symbol.data_type.clone())
+                .to_comp_res(self.location)?;
 
             let value =
                 expr.generate_casted(gen, path, function, &resolved_type, &ValueType::RValue)?;
@@ -468,9 +595,8 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         let var_type = self.deduce_type(path, symtable)?;
-        err_with_location(
-            self.location,
-            symtable.add_symbol(
+        symtable
+            .add_symbol(
                 path,
                 SymbolInfo {
                     name: self.name.clone(),
@@ -478,8 +604,8 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for VarDeclNode<'ctx, 'st> {
                     data_type: var_type,
                     location: self.location,
                 },
-            ),
-        )?;
+            )
+            .to_comp_res(self.location)?;
         Ok(())
     }
 
@@ -501,17 +627,22 @@ impl<'ctx, 'st> RefDeclNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for RefDeclNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
-        let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
-        let addr = *err_with_location(self.location, gen.addrtable.find_symbol(path, &self.name))?;
-        let resolved_type = err_with_location(
-            self.location,
-            gen.symtable
-                .resolve_type_alias(path, symbol.data_type.clone()),
-        )?;
+        let symbol = gen
+            .symtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
+        let addr = *gen
+            .addrtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
+        let resolved_type = gen
+            .symtable
+            .resolve_type_alias(path, symbol.data_type.clone())
+            .to_comp_res(self.location)?;
 
         let value =
             self.expression
@@ -526,9 +657,8 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for RefDeclNode<'ctx, 'st> {
 
     fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()> {
         let var_type = self.deduce_type(path, symtable)?;
-        err_with_location(
-            self.location,
-            symtable.add_symbol(
+        symtable
+            .add_symbol(
                 path,
                 SymbolInfo {
                     name: self.name.clone(),
@@ -536,8 +666,8 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for RefDeclNode<'ctx, 'st> {
                     data_type: var_type,
                     location: self.location,
                 },
-            ),
-        )?;
+            )
+            .to_comp_res(self.location)?;
         Ok(())
     }
 
@@ -549,7 +679,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for RefDeclNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
@@ -600,7 +730,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for IfNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
@@ -642,7 +772,7 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for WhileNode<'ctx, 'st> {
 impl<'ctx, 'st> StatementNode<'ctx, 'st> for ExpressionStatementNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
     ) -> CompilerResult<()> {
@@ -671,13 +801,16 @@ impl<'ctx, 'st> StatementNode<'ctx, 'st> for ExpressionStatementNode<'ctx, 'st> 
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         _: &Type,
         value_type: &ValueType,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
+        let symbol = gen
+            .symtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
         match symbol.sym_type {
             SymbolType::FunctionArg(index, is_ref) => {
                 let arg_expr = wrap_option(
@@ -704,11 +837,15 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
             SymbolType::LocalVariable => {
                 let (sym, ptr) =
                     gen.find_symbol_with_addr(self.location, path, self.name.as_ref())?;
+                let data_type = gen
+                    .symtable
+                    .resolve_type_alias(path, sym.data_type.clone())
+                    .to_comp_res(self.location)?;
                 match *value_type {
                     ValueType::LValue => Ok(Box::new(*ptr)),
                     ValueType::RValue => Ok(Box::new(gen.load_var(
                         self.location,
-                        &sym.data_type,
+                        &data_type,
                         ptr,
                         self.name.as_ref(),
                     )?)),
@@ -752,7 +889,9 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
         path: &SymbolPath,
         _: &Type,
     ) -> CompilerResult<Type> {
-        let symbol = err_with_location(self.location, symtable.find_symbol(path, &self.name))?;
+        let symbol = symtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
         Ok(symbol.data_type.clone())
     }
 
@@ -764,7 +903,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for IdentifierNode {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NullNode {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         _: &SymbolPath,
         _: &FunctionValue<'ctx>,
         _: &Type,
@@ -782,10 +921,45 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NullNode {
     }
 }
 
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SelfNode {
+    fn generate(
+        &self,
+        gen: &mut IRBuildContext<'ctx, 'st>,
+        path: &SymbolPath,
+        func: &FunctionValue<'ctx>,
+        _: &Type,
+        _: &ValueType,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        let sym = gen
+            .symtable
+            .find_symbol(path, "self")
+            .to_comp_res(self.location)?;
+        if let SymbolType::FunctionArg(index, _) = sym.sym_type {
+            let arg_expr = wrap_option(
+                sym.location,
+                func.get_nth_param(index as u32),
+                "invalid function argument",
+            )?;
+            Ok(Box::new(arg_expr))
+        } else {
+            compiler_err!(self.location, "self is defined incorrectly");
+        }
+    }
+
+    fn deduce_type(&self, tb: &SymbolTable, path: &SymbolPath, _: &Type) -> CompilerResult<Type> {
+        let sym = tb.find_symbol(path, "self").to_comp_res(self.location)?;
+        Ok(sym.data_type.clone())
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         _function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -821,7 +995,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
 
     fn to_constexpr_value(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         expected_type: &Type,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
@@ -834,7 +1008,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
         if let AnyTypeEnum::IntType(it) = llvm_type {
             Ok(Box::new(it.const_int(self.number, true)))
         } else {
-            compiler_err!(self.location, "tried assiging number to a non int type");
+            compiler_err!(self.location, "tried assigning number to a non int type");
         }
     }
 }
@@ -842,7 +1016,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for NumberNode {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for StringNode {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         _: &SymbolPath,
         _function: &FunctionValue<'ctx>,
         _: &Type,
@@ -908,7 +1082,7 @@ impl<'ctx, 'st> BinaryExpressionNode<'ctx, 'st> {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -1052,7 +1226,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 
     fn generate_boolean(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         true_block: BasicBlock<'ctx>,
@@ -1101,7 +1275,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for BinaryExpressionNode<'ctx, 'st> {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -1119,13 +1293,9 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
                     .generate(r#gen, path, function, expected_type, &ValueType::LValue)
             }
             SingularOperation::Deference => {
-                let ptr_box = self.expr.generate(
-                    r#gen,
-                    path,
-                    function,
-                    &Type::RawPtr,
-                    &ValueType::RValue,
-                )?;
+                let ptr_box =
+                    self.expr
+                        .generate(r#gen, path, function, &Type::RawPtr, &ValueType::RValue)?;
                 match value_type {
                     ValueType::LValue => Ok(ptr_box),
                     ValueType::RValue => {
@@ -1183,7 +1353,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
 
     fn generate_boolean(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         true_block: BasicBlock<'ctx>,
@@ -1221,10 +1391,33 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for SingularExpressionNode<'ctx, 'st> 
     }
 }
 
+fn collect_function_call_args<'ctx, 'st>(
+    gen: &mut IRBuildContext<'ctx, 'st>,
+    path: &SymbolPath,
+    function: &FunctionValue<'ctx>,
+    fn_type: &FuncTypeBox<Type>,
+    args: &[ExpressionBox<'ctx, 'st>],
+    arg_offset: usize,
+    call_args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
+) -> CompilerResult<()> {
+    for (i, arg_expr) in args.iter().enumerate() {
+        let arg_type = &fn_type.args[i + arg_offset];
+        let arg_value = if arg_type.is_ref {
+            arg_expr.generate(gen, path, function, &arg_type.arg_type, &ValueType::LValue)?
+        } else {
+            arg_expr.generate(gen, path, function, &arg_type.arg_type, &ValueType::RValue)?
+        };
+
+        let arg_value_enum = arg_value.as_basic_value_enum();
+        call_args.push(arg_value_enum.into());
+    }
+    Ok(())
+}
+
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         _expected_type: &Type,
@@ -1237,42 +1430,30 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
             );
         }
 
-        let symbol = err_with_location(self.location, gen.symtable.find_symbol(path, &self.name))?;
+        let symbol = gen
+            .symtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
         if let Type::Function(fn_type) = &symbol.data_type {
             if fn_type.args.len() != self.args.len() {
                 compiler_err!(self.location, "invalid number of arguments");
             }
 
             let mut call_args = Vec::<BasicMetadataValueEnum>::new();
-            for (i, arg_expr) in self.args.iter().enumerate() {
-                let arg_type = &fn_type.args[i];
-                let arg_value = if arg_type.is_ref {
-                    arg_expr.generate(
-                        gen,
-                        path,
-                        function,
-                        &arg_type.arg_type,
-                        &ValueType::LValue,
-                    )?
-                } else {
-                    arg_expr.generate(
-                        gen,
-                        path,
-                        function,
-                        &arg_type.arg_type,
-                        &ValueType::RValue,
-                    )?
-                };
-
-                let arg_value_enum = arg_value.as_basic_value_enum();
-                call_args.push(arg_value_enum.into());
-            }
-
-            let func = wrap_option(
-                self.location,
-                gen.addrtable.find_func(path, &self.name),
-                "no function found.",
+            collect_function_call_args(
+                gen,
+                path,
+                function,
+                &fn_type,
+                self.args.as_ref(),
+                0,
+                &mut call_args,
             )?;
+
+            let func = gen
+                .addrtable
+                .find_func(path, &self.name)
+                .to_comp_res_with_desc(self.location, "no function found.")?;
             let call_res = gen
                 .builder
                 .build_call(*func, call_args.as_ref(), self.name.as_ref())
@@ -1298,7 +1479,9 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
         path: &SymbolPath,
         _: &Type,
     ) -> CompilerResult<Type> {
-        let symbol = err_with_location(self.location, symtable.find_symbol(path, &self.name))?;
+        let symbol = symtable
+            .find_symbol(path, &self.name)
+            .to_comp_res(self.location)?;
         if let Type::Function(fn_type) = &symbol.data_type {
             return Ok(fn_type.ret_type.clone());
         }
@@ -1317,7 +1500,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for FunctionCall<'ctx, 'st> {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetElementNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -1369,7 +1552,7 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetElementNode<'ctx, 'st> {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for CastNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -1407,12 +1590,12 @@ impl<'ctx, 'st> GetFieldNode<'ctx, 'st> {
             .object_expr
             .deduce_type(symtable, path, expected_type)?;
         if let Type::Alias(alias) = &obj_type {
-            let alias_path =
-                err_with_location(self.location, symtable.find_symbol_path(path, alias))?;
-            let symbol = err_with_location(
-                self.location,
-                symtable.find_symbol(&alias_path, &self.field_name),
-            )?;
+            let alias_path = symtable
+                .find_symbol_path(path, alias)
+                .to_comp_res(self.location)?;
+            let symbol = symtable
+                .find_symbol(&alias_path, &self.field_name)
+                .to_comp_res(self.location)?;
             Ok(symbol)
         } else {
             compiler_err!(self.location, "invalid object type");
@@ -1423,7 +1606,7 @@ impl<'ctx, 'st> GetFieldNode<'ctx, 'st> {
 impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetFieldNode<'ctx, 'st> {
     fn generate(
         &self,
-        gen: &mut IlGenerator<'ctx, 'st>,
+        gen: &mut IRBuildContext<'ctx, 'st>,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
         expected_type: &Type,
@@ -1432,35 +1615,45 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetFieldNode<'ctx, 'st> {
         let obj_type = self
             .object_expr
             .deduce_type(gen.symtable, path, expected_type)?;
-        let obj_resolved = err_with_location(
-            self.location,
-            gen.symtable.resolve_type_alias(path, obj_type),
-        )?;
+        let obj_resolved = gen
+            .symtable
+            .resolve_type_alias(path, obj_type)
+            .to_comp_res(self.location)?;
         let obj =
             self.object_expr
                 .generate(gen, path, function, &obj_resolved, &ValueType::LValue)?;
-        let ptr = obj.as_ref().to_ptr(self.location)?;
+
         let sym = self.get_symbol(gen.symtable, path, expected_type)?;
 
         if let SymbolType::StructField(id) = sym.sym_type {
-            let field_ptr = gen.build_get_element_ptr(
-                self.location,
-                &obj_resolved,
-                ptr,
-                &[
-                    gen.context.i32_type().const_int(0, true),
-                    gen.context.i32_type().const_int(id as u64, true),
-                ],
-                &self.field_name,
-            )?;
-            match value_type {
-                ValueType::LValue => Ok(Box::new(field_ptr)),
-                ValueType::RValue => Ok(Box::new(gen.load_var(
-                    self.location,
-                    &sym.data_type,
-                    &field_ptr,
-                    "structfield",
-                )?)),
+            match obj.as_ref().as_basic_value_enum() {
+                BasicValueEnum::PointerValue(ptr) => {
+                    let field_ptr = gen.build_get_element_ptr(
+                        self.location,
+                        &obj_resolved,
+                        ptr,
+                        &[
+                            gen.context.i32_type().const_int(0, true),
+                            gen.context.i32_type().const_int(id as u64, true),
+                        ],
+                        &self.field_name,
+                    )?;
+                    match value_type {
+                        ValueType::LValue => Ok(Box::new(field_ptr)),
+                        ValueType::RValue => Ok(Box::new(gen.load_var(
+                            self.location,
+                            &sym.data_type,
+                            &field_ptr,
+                            "structfield",
+                        )?)),
+                        _ => compiler_err!(self.location, "invalid symbol"),
+                    }
+                }
+                BasicValueEnum::StructValue(struct_val) => Ok(Box::new(
+                    gen.builder
+                        .build_extract_value(struct_val, id as u32, "extracted")
+                        .to_comp_res(self.location)?,
+                )),
                 _ => compiler_err!(self.location, "invalid symbol"),
             }
         } else {
@@ -1476,6 +1669,110 @@ impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for GetFieldNode<'ctx, 'st> {
     ) -> CompilerResult<Type> {
         let sym = self.get_symbol(symtable, path, expected_type)?;
         Ok(sym.data_type.clone())
+    }
+
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl<'ctx, 'st> MethodCall<'ctx, 'st> {
+    fn get_method_path(
+        &self,
+        symtable: &SymbolTable,
+        path: &SymbolPath,
+    ) -> CompilerResult<SymbolPath> {
+        let obj_type = self.object_expr.deduce_type(symtable, path, &Type::Void)?;
+        if let Type::Alias(alias) = &obj_type {
+            let receiver_path = symtable
+                .find_symbol_path(path, alias)
+                .to_comp_res(self.location)?;
+            Ok(receiver_path.sub(&self.name))
+        } else {
+            compiler_err!(self.location, "invalid object type")
+        }
+    }
+}
+
+impl<'ctx, 'st> ExpressionNode<'ctx, 'st> for MethodCall<'ctx, 'st> {
+    fn generate(
+        &self,
+        gen: &mut IRBuildContext<'ctx, 'st>,
+        path: &SymbolPath,
+        function: &FunctionValue<'ctx>,
+        expected_type: &Type,
+        value_type: &ValueType,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        let method_path = self.get_method_path(gen.symtable, path)?;
+
+        let method = gen
+            .symtable
+            .find_by_path(&method_path)
+            .to_comp_res_with_desc(self.location, "unknown method")?;
+
+        if let Type::Function(fn_type) = &method.data_type {
+            let self_arg = &fn_type.args[0];
+
+            let receiver = self.object_expr.generate(
+                gen,
+                path,
+                function,
+                &self_arg.arg_type,
+                if self_arg.is_ref {
+                    &ValueType::LValue
+                } else {
+                    &ValueType::RValue
+                },
+            )?;
+
+            let mut call_args = Vec::<BasicMetadataValueEnum<'ctx>>::new();
+            call_args.push(receiver.as_basic_value_enum().into());
+            collect_function_call_args(
+                gen,
+                path,
+                function,
+                &fn_type,
+                self.args.as_ref(),
+                1,
+                &mut call_args,
+            )?;
+
+            let func = gen
+                .addrtable
+                .find_func(&method_path.parent(), &self.name)
+                .to_comp_res_with_desc(self.location, "no function found.")?;
+            let call_res = gen
+                .builder
+                .build_call(*func, call_args.as_ref(), self.name.as_ref())
+                .to_comp_res(self.location)?;
+
+            let res = call_res.try_as_basic_value();
+            if let Either::Left(call_res_bv) = res {
+                Ok(Box::new(call_res_bv))
+            } else {
+                Ok(gen.null_ptr())
+            }
+        } else {
+            compiler_err!(self.location, "invalid function type")
+        }
+    }
+
+    fn deduce_type(
+        &self,
+        symtable: &SymbolTable,
+        path: &SymbolPath,
+        _: &Type,
+    ) -> CompilerResult<Type> {
+        let method_path = self.get_method_path(symtable, path)?;
+        let method = symtable
+            .find_by_path(&method_path)
+            .to_comp_res_with_desc(self.location, "unknown method")?;
+
+        if let Type::Function(func_type) = &method.data_type {
+            Ok(func_type.ret_type.clone())
+        } else {
+            compiler_err!(self.location, "invalid receiver type")
+        }
     }
 
     fn get_location(&self) -> &Location {

@@ -8,6 +8,18 @@ pub struct CompilerError {
 }
 pub type CompilerResult<T> = Result<T, CompilerError>;
 
+pub trait CompilerResultErrorMapper {
+    type Value;
+
+    fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value>;
+}
+
+pub trait CompilerResultErrorMapperWithDesc {
+    type Value;
+
+    fn to_comp_res_with_desc(self, loc: Location, desc: &str) -> CompilerResult<Self::Value>;
+}
+
 pub enum SymbolLookupError {
     AlreadyRegistered(String),
     NoSymbolFound(String),
@@ -24,8 +36,12 @@ impl SymbolLookupError {
 
 pub type SymbolLookupResult<T> = Result<T, SymbolLookupError>;
 
-pub fn err_with_location<T>(loc: Location, res: SymbolLookupResult<T>) -> CompilerResult<T> {
-    res.map_err(|err| CompilerError{message: err.message(), location: loc})
+impl<T> CompilerResultErrorMapper for SymbolLookupResult<T> {
+    type Value = T;
+
+    fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value> {
+        self.map_err(|err| CompilerError{message: err.message(), location: loc})
+    }
 }
 
 #[macro_export]
@@ -47,16 +63,23 @@ pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str)  -> CompilerResu
     }
 }
 
-pub trait CompilerResultErrorMapper {
-    type Value;
-
-    fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value>;
-}
-
 impl<T> CompilerResultErrorMapper for Result<T, BuilderError> {
     type Value = T;
 
     fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value> {
         self.map_err(|be| CompilerError{message: format!("builder error: {:?}", be), location: loc})
+    }
+}
+
+impl<T> CompilerResultErrorMapperWithDesc for Option<T> {
+    type Value = T;
+
+    fn to_comp_res_with_desc(self, loc: Location, desc: &str) -> CompilerResult<Self::Value> {
+        match self {
+            Some(value) => Ok(value),
+            None => {
+                compiler_err!(loc, "{}", desc);
+            },
+        }
     }
 }

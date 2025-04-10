@@ -14,7 +14,7 @@ pub struct FuncType<T> {
     pub ret_type: T,
 }
 
-type FuncTypeBox<T> = Box<FuncType<T>>;
+pub type FuncTypeBox<T> = Box<FuncType<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructType<T> {
@@ -49,6 +49,18 @@ fn struct_to_llvm_type<'ctx>(ctx: &'ctx Context, struct_type: &StructType<Type>)
 }
 
 impl Type {
+    pub fn from_string(s: &str) -> Type {
+        match s {
+            "void" => Type::Void,
+            "i32" => Type::Int32,
+            "f32" => Type::Float32,
+            "bool" => Type::Bool,
+            "rawptr" => Type::RawPtr,
+            _ => Type::Alias(s.into()),
+        }
+
+    }
+
     pub fn from_keyword(kw: &Keyword) -> Option<Type> {
         match kw {
             Keyword::Void => Some(Type::Void),
@@ -159,10 +171,10 @@ impl Type {
 macro_rules! visit_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
         match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
-            AnyTypeEnum::PointerType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::IntType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::FloatType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::StructType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::PointerType($y) => $z,
+            AnyTypeEnum::IntType($y) => $z,
+            AnyTypeEnum::FloatType($y) => $z,
+            AnyTypeEnum::StructType($y) => $z,
             _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
         }
     };
@@ -172,11 +184,11 @@ macro_rules! visit_type {
 macro_rules! visit_any_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
         match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
-            AnyTypeEnum::PointerType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::IntType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::FloatType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::StructType($y) => $z.to_comp_res($loc),
-            AnyTypeEnum::VoidType($y) => $z.to_comp_res($loc),
+            AnyTypeEnum::PointerType($y) => $z,
+            AnyTypeEnum::IntType($y) => $z,
+            AnyTypeEnum::FloatType($y) => $z,
+            AnyTypeEnum::StructType($y) => $z,
+            AnyTypeEnum::VoidType($y) => $z,
             _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
         }
     };

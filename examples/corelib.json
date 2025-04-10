@@ -1,0 +1,16 @@
+{
+  "name": "corelib",
+  "functions": [
+    {
+      "name": "print",
+      "return_type": "void",
+      "args": [
+        {
+          "name": "msg",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    }
+  ]
+}

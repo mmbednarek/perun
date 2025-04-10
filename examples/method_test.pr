@@ -1,0 +1,33 @@
+import corelib;
+
+struct Foo {
+    lorem: i32,
+    ipsum: i32,
+}
+
+fn Foo.add_attribs(self) : i32 {
+    return self.lorem + self.ipsum;
+}
+
+fn Foo.set_values(ref self, lorem: i32, ipsum: i32) {
+    self.lorem = lorem;
+    self.ipsum = ipsum;
+}
+
+fn Foo.reset_values(ref self) {
+    self.set_values(0, 0);
+}
+
+fn main() : i32 {
+    var foo: Foo;
+    foo.lorem = 10;
+    foo.ipsum = 20;
+
+    foo.set_values(34, 2);
+
+    foo.reset_values();
+
+    print("hello!\n");
+
+    return foo.add_attribs();
+}
