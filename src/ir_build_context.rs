@@ -129,39 +129,6 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
             .unwrap();
     }
 
-    pub fn load_var(
-        &self,
-        location: Location,
-        var_type: &Type,
-        ptr: &PointerValue<'ctx>,
-        name: &str,
-    ) -> CompilerResult<BasicValueEnum<'ctx>> {
-        visit_type!(
-            location,
-            self.context,
-            var_type,
-            value,
-            self.builder
-                .build_load(value, *ptr, name)
-                .to_comp_res(location)
-        )
-    }
-
-    pub fn alloc_var(
-        &self,
-        location: Location,
-        var_type: &Type,
-        name: &str,
-    ) -> CompilerResult<PointerValue<'ctx>> {
-        visit_type!(
-            location,
-            self.context,
-            var_type,
-            value,
-            self.builder.build_alloca(value, name).to_comp_res(location)
-        )
-    }
-
     pub fn build_sext(
         &self,
         location: Location,

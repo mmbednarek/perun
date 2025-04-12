@@ -158,14 +158,16 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
     pub fn load_value(
         &self,
         node: &IdentifierNode,
+        path: &SymbolPath,
         data_type: &Type,
         value_type: &ValueType,
         ptr: &PointerValue<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         match value_type {
             ValueType::LValue => Ok(Box::new(*ptr)),
-            ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
-                node.location,
+            ValueType::RValue => Ok(Box::new(self.load_variable(
+                &node.location,
+                path,
                 &data_type,
                 ptr,
                 node.name.as_ref(),
@@ -519,6 +521,43 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                 .to_comp_res(location)
         }
     }
+
+    pub fn load_variable(
+        &self,
+        location: &Location,
+        path: &SymbolPath,
+        var_type: &Type,
+        ptr: &PointerValue<'ctx>,
+        name: &str,
+    ) -> CompilerResult<BasicValueEnum<'ctx>> {
+        let translated_type = self
+            .translate_type(location, path, var_type)?
+            .to_basic_type()
+            .to_comp_res_with_desc(*location, "invalid type")?;
+
+        self.ir_builder
+            .builder
+            .build_load(translated_type, *ptr, name)
+            .to_comp_res(*location)
+    }
+
+    pub fn allocate_variable(
+        &self,
+        location: &Location,
+        path: &SymbolPath,
+        var_type: &Type,
+        name: &str,
+    ) -> CompilerResult<PointerValue<'ctx>> {
+        let translated_type = self
+            .translate_type(location, path, var_type)?
+            .to_basic_type()
+            .to_comp_res_with_desc(*location, "invalid type")?;
+
+        self.ir_builder
+            .builder
+            .build_alloca(translated_type, name)
+            .to_comp_res(*location)
+    }
 }
 
 impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
@@ -619,8 +658,9 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
                                 .register_ptr(path.clone(), addr);
                         }
                         SymbolType::LocalReference => {
-                            let addr = self.ir_builder.alloc_var(
-                                sym.location,
+                            let addr = self.allocate_variable(
+                                &sym.location,
+                                &path,
                                 &Type::RawPtr,
                                 &sym.name,
                             )?;
@@ -1020,8 +1060,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     let arg_ptr = arg_expr.to_ptr(symbol.location)?;
                     match pd.value_type {
                         ValueType::LValue => Ok(Box::new(arg_ptr)),
-                        ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
-                            node.location,
+                        ValueType::RValue => Ok(Box::new(self.load_variable(
+                            &node.location,
+                            &pd.path,
                             &symbol.data_type,
                             &arg_ptr,
                             node.name.as_ref(),
@@ -1043,7 +1084,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     .symbol_table
                     .resolve_type_alias(&pd.path, sym.data_type.clone())
                     .to_comp_res(node.location)?;
-                self.load_value(node, &data_type, &pd.value_type, ptr)
+                self.load_value(node, &pd.path, &data_type, &pd.value_type, ptr)
             }
             SymbolType::LocalReference => {
                 let (sym, ptr) = self.ir_builder.find_symbol_with_addr(
@@ -1051,14 +1092,15 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     &pd.path,
                     node.name.as_ref(),
                 )?;
-                let loaded_ptr_var = self.ir_builder.load_var(
-                    node.location,
+                let loaded_ptr_var = self.load_variable(
+                    &node.location,
+                    &pd.path,
                     &Type::RawPtr,
                     ptr,
                     node.name.as_ref(),
                 )?;
                 let loaded_ptr = loaded_ptr_var.to_ptr(node.location)?;
-                self.load_value(node, &sym.data_type, &pd.value_type, &loaded_ptr)
+                self.load_value(node, &pd.path, &sym.data_type, &pd.value_type, &loaded_ptr)
             }
             SymbolType::ConstantDef => {
                 let basic_val = self
@@ -1369,8 +1411,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     ValueType::LValue => Ok(ptr_box),
                     ValueType::RValue => {
                         let ptr = ptr_box.as_ref().to_ptr(node.location)?;
-                        Ok(Box::new(self.ir_builder.load_var(
-                            node.location,
+                        Ok(Box::new(self.load_variable(
+                            &node.location,
+                            &pd.path,
                             &pd.expected_type,
                             &ptr,
                             "deref",
@@ -1517,8 +1560,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
         match pd.value_type {
             ValueType::LValue => Ok(Box::<PointerValue<'ctx>>::new(indexed_ptr.into())),
-            ValueType::RValue => Ok(Box::<BasicValueEnum<'ctx>>::new(self.ir_builder.load_var(
-                node.location,
+            ValueType::RValue => Ok(Box::<BasicValueEnum<'ctx>>::new(self.load_variable(
+                &node.location,
+                &pd.path,
                 &pd.expected_type,
                 &indexed_ptr,
                 "addrvalue",
@@ -1568,8 +1612,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     )?;
                     match pd.value_type {
                         ValueType::LValue => Ok(Box::new(field_ptr)),
-                        ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
-                            node.location,
+                        ValueType::RValue => Ok(Box::new(self.load_variable(
+                            &node.location,
+                            &pd.path,
                             &sym.data_type,
                             &field_ptr,
                             "structfield",
