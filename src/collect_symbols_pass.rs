@@ -20,23 +20,6 @@ impl<'st> CollectSymbolsPass<'st> {
         }
         Ok(())
     }
-
-    fn deduce_ref_decl_node_type(
-        &self,
-        node: &RefDeclNode,
-        path: &SymbolPath,
-    ) -> CompilerResult<Type> {
-        if let Some(vt) = &node.var_type {
-            Ok(vt.clone())
-        } else {
-            deduce_type(
-                self.symbol_table,
-                path.clone(),
-                Type::Void,
-                node.expression.as_ref(),
-            )
-        }
-    }
 }
 
 impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {

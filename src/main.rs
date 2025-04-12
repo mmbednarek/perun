@@ -27,7 +27,7 @@ mod symbols;
 use crate::ast::GlobalStatementVisitor;
 use symbols::{SymbolPath, SymbolTable};
 
-mod address_table;
+mod ir_value_storage;
 
 mod collect_symbols_pass;
 mod compile_time_evaluation_pass;

@@ -1,12 +1,7 @@
 use crate::error::{CompilerResult, CompilerResultErrorMapper};
-use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, ValueType};
-
-use inkwell::basic_block::BasicBlock;
-use inkwell::values::FunctionValue;
-use inkwell::IntPredicate;
 
 fn create_method_name(receiver: &str, name: &str) -> String {
     format!("perun.method.{}.{}", receiver, name)
@@ -81,18 +76,6 @@ impl BinaryOperation {
             BinaryOperation::LogicalAnd => 3,
             BinaryOperation::LogicalOr => 2,
             BinaryOperation::Assign => 1,
-        }
-    }
-
-    pub fn to_llvm_int_predicate(&self) -> Option<IntPredicate> {
-        match self {
-            BinaryOperation::Less => Some(IntPredicate::SLT),
-            BinaryOperation::LessOrEqual => Some(IntPredicate::SLE),
-            BinaryOperation::Greater => Some(IntPredicate::SGT),
-            BinaryOperation::GreaterOrEqual => Some(IntPredicate::SGE),
-            BinaryOperation::Equals => Some(IntPredicate::EQ),
-            BinaryOperation::NotEquals => Some(IntPredicate::NE),
-            _ => None,
         }
     }
 

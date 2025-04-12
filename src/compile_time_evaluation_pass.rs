@@ -43,7 +43,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
 
     fn visit_number(&self, node: &NumberNode, pd: &Self::Payload) -> Self::VisitResult {
         let num_type = deduce_type(
-            &self.build_context.symtable,
+            &self.build_context.symbol_table,
             pd.path.clone(),
             pd.expected_type.clone(),
             &node.into(),

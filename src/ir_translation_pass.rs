@@ -9,14 +9,26 @@ use crate::typing::{FuncTypeBox, Type, ValueType};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
-use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum};
+use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{
-    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue,
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 use inkwell::AddressSpace;
-use std::fmt::Pointer;
+use inkwell::IntPredicate;
 
 impl BinaryOperation {
+    pub fn to_llvm_int_predicate(&self) -> Option<IntPredicate> {
+        match self {
+            BinaryOperation::Less => Some(IntPredicate::SLT),
+            BinaryOperation::LessOrEqual => Some(IntPredicate::SLE),
+            BinaryOperation::Greater => Some(IntPredicate::SGT),
+            BinaryOperation::GreaterOrEqual => Some(IntPredicate::SGE),
+            BinaryOperation::Equals => Some(IntPredicate::EQ),
+            BinaryOperation::NotEquals => Some(IntPredicate::NE),
+            _ => None,
+        }
+    }
+
     pub fn build<'ctx, 'st>(
         &self,
         gen: &IRBuildContext<'ctx, 'st>,
@@ -116,13 +128,89 @@ impl BinaryOperation {
     }
 }
 
+trait AnyTypeEnumUtil<'ctx> {
+    fn to_basic_type(&self) -> Option<BasicTypeEnum<'ctx>>;
+}
+
+impl<'ctx> AnyTypeEnumUtil<'ctx> for AnyTypeEnum<'ctx> {
+    fn to_basic_type(&self) -> Option<BasicTypeEnum<'ctx>> {
+        match self {
+            AnyTypeEnum::ArrayType(tp) => Some(BasicTypeEnum::ArrayType(*tp)),
+            AnyTypeEnum::FloatType(tp) => Some(BasicTypeEnum::FloatType(*tp)),
+            AnyTypeEnum::IntType(tp) => Some(BasicTypeEnum::IntType(*tp)),
+            AnyTypeEnum::PointerType(tp) => Some(BasicTypeEnum::PointerType(*tp)),
+            AnyTypeEnum::StructType(tp) => Some(BasicTypeEnum::StructType(*tp)),
+            AnyTypeEnum::VectorType(tp) => Some(BasicTypeEnum::VectorType(*tp)),
+            _ => None,
+        }
+    }
+}
+
 pub struct IRTranslationPass<'irb, 'ctx, 'st> {
-    gen: &'irb mut IRBuildContext<'ctx, 'st>,
+    ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
 }
 
 impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
     pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>) -> Self {
-        Self { gen: ir_builder }
+        Self { ir_builder }
+    }
+
+    pub fn load_value(
+        &self,
+        node: &IdentifierNode,
+        data_type: &Type,
+        value_type: &ValueType,
+        ptr: &PointerValue<'ctx>,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        match value_type {
+            ValueType::LValue => Ok(Box::new(*ptr)),
+            ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
+                node.location,
+                &data_type,
+                ptr,
+                node.name.as_ref(),
+            )?)),
+            ValueType::None => Ok(self.ir_builder.null_ptr()),
+        }
+    }
+
+    fn collect_function_call_args(
+        &self,
+        path: &SymbolPath,
+        function: &FunctionValue<'ctx>,
+        fn_type: &FuncTypeBox<Type>,
+        args: &[ExpressionBox],
+        arg_offset: usize,
+        call_args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
+    ) -> CompilerResult<()> {
+        for (i, arg_expr) in args.iter().enumerate() {
+            let arg_type = &fn_type.args[i + arg_offset];
+            let arg_value = if arg_type.is_ref {
+                self.visit_expression(
+                    arg_expr.as_ref(),
+                    &ExpressionPayload {
+                        path: path.clone(),
+                        function: function.clone(),
+                        expected_type: arg_type.arg_type.clone(),
+                        value_type: ValueType::LValue,
+                    },
+                )?
+            } else {
+                self.visit_expression(
+                    arg_expr.as_ref(),
+                    &ExpressionPayload {
+                        path: path.clone(),
+                        function: function.clone(),
+                        expected_type: arg_type.arg_type.clone(),
+                        value_type: ValueType::RValue,
+                    },
+                )?
+            };
+
+            let arg_value_enum = arg_value.as_basic_value_enum();
+            call_args.push(arg_value_enum.into());
+        }
+        Ok(())
     }
 
     fn translate_scope(
@@ -130,8 +218,11 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         node: &ScopeNode,
         pd: &StatementPayload<'ctx>,
     ) -> CompilerResult<BasicBlock<'ctx>> {
-        let basic_block = self.gen.context.append_basic_block(pd.function, &node.name);
-        self.gen.builder.position_at_end(basic_block);
+        let basic_block = self
+            .ir_builder
+            .context
+            .append_basic_block(pd.function, &node.name);
+        self.ir_builder.builder.position_at_end(basic_block);
 
         self.visit_scope_statements(node, pd)?;
 
@@ -155,7 +246,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         expected_type: Type,
         node: &AnyExpressionNode,
     ) -> CompilerResult<Type> {
-        deduce_type(self.gen.symtable, path, expected_type, node)
+        deduce_type(self.ir_builder.symbol_table, path, expected_type, node)
     }
 
     fn evaluate_compile_time_value(
@@ -164,7 +255,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         expected_type: Type,
         node: &AnyExpressionNode,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        crate::compile_time_evaluation_pass::CompileTimeEvaluationPass::new(self.gen)
+        crate::compile_time_evaluation_pass::CompileTimeEvaluationPass::new(self.ir_builder)
             .visit_expression(
                 node,
                 &crate::compile_time_evaluation_pass::Payload {
@@ -172,6 +263,56 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     expected_type,
                 },
             )
+    }
+
+    fn build_cast(
+        &self,
+        location: Location,
+        source_type: &Type,
+        target_type: &Type,
+        value: Box<dyn BasicValue<'ctx> + 'ctx>,
+    ) -> CompilerResult<Box<dyn BasicValue<'ctx> + 'ctx>> {
+        if *source_type == *target_type {
+            return Ok(value);
+        }
+
+        if !source_type.is_int_type() {
+            compiler_err!(location, "source cast must be an int");
+        }
+
+        let int_value = value.as_ref().to_int(location)?;
+
+        if target_type.is_bool_type() {
+            Ok(Box::new(
+                self.ir_builder
+                    .builder
+                    .build_int_compare(
+                        IntPredicate::NE,
+                        int_value,
+                        self.ir_builder.context.i32_type().const_int(0, true),
+                        "tobool",
+                    )
+                    .to_comp_res(location)?,
+            ))
+        } else if target_type.is_int_type() {
+            if target_type.byte_count() > source_type.byte_count() {
+                Ok(Box::new(self.ir_builder.build_sext(
+                    location,
+                    target_type,
+                    int_value,
+                    "intsext",
+                )?))
+            } else {
+                Ok(Box::new(self.ir_builder.build_trunc(
+                    location,
+                    target_type,
+                    int_value,
+                    "inttrunc",
+                )?))
+            }
+        } else {
+            compiler_err!(location, "unsupported cast target type");
+        }
     }
 
     fn translate_with_cast(
@@ -184,8 +325,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             Ok(stmt)
         } else {
             let deduced_type = self.deduce_type(pd.path.clone(), pd.expected_type.clone(), node)?;
-            self.gen
-                .build_cast(*node.get_location(), &deduced_type, &pd.expected_type, stmt)
+            self.build_cast(*node.get_location(), &deduced_type, &pd.expected_type, stmt)
         }
     }
 
@@ -207,7 +347,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             },
         )?;
         let value_int = value.as_ref().to_int(*node.get_location())?;
-        self.gen
+        self.ir_builder
             .builder
             .build_conditional_branch(value_int, true_block, false_block)
             .to_comp_res(*node.get_location())?;
@@ -224,7 +364,10 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
     ) -> CompilerResult<()> {
         match node.operation {
             BinaryOperation::LogicalAnd => {
-                let and_block = self.gen.context.append_basic_block(*function, "and.pred");
+                let and_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(*function, "and.pred");
                 self.translate_to_boolean(
                     node.left.as_ref(),
                     path,
@@ -232,7 +375,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     and_block,
                     false_block,
                 )?;
-                self.gen.builder.position_at_end(and_block);
+                self.ir_builder.builder.position_at_end(and_block);
                 self.translate_to_boolean(
                     node.right.as_ref(),
                     path,
@@ -242,7 +385,10 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                 )?;
             }
             BinaryOperation::LogicalOr => {
-                let or_block = self.gen.context.append_basic_block(*function, "or.pred");
+                let or_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(*function, "or.pred");
                 self.translate_to_boolean(
                     node.left.as_ref(),
                     path,
@@ -250,7 +396,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     true_block,
                     or_block,
                 )?;
-                self.gen.builder.position_at_end(or_block);
+                self.ir_builder.builder.position_at_end(or_block);
                 self.translate_to_boolean(
                     node.right.as_ref(),
                     path,
@@ -320,45 +466,59 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             _ => self.build_boolean_branch(node, path, function, true_block, false_block),
         }
     }
-}
 
-fn collect_function_call_args<'irb, 'ctx, 'st>(
-    pass: &IRTranslationPass<'irb, 'ctx, 'st>,
-    path: &SymbolPath,
-    function: &FunctionValue<'ctx>,
-    fn_type: &FuncTypeBox<Type>,
-    args: &[ExpressionBox],
-    arg_offset: usize,
-    call_args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
-) -> CompilerResult<()> {
-    for (i, arg_expr) in args.iter().enumerate() {
-        let arg_type = &fn_type.args[i + arg_offset];
-        let arg_value = if arg_type.is_ref {
-            pass.visit_expression(
-                arg_expr.as_ref(),
-                &ExpressionPayload {
-                    path: path.clone(),
-                    function: function.clone(),
-                    expected_type: arg_type.arg_type.clone(),
-                    value_type: ValueType::LValue,
-                },
-            )?
-        } else {
-            pass.visit_expression(
-                arg_expr.as_ref(),
-                &ExpressionPayload {
-                    path: path.clone(),
-                    function: function.clone(),
-                    expected_type: arg_type.arg_type.clone(),
-                    value_type: ValueType::RValue,
-                },
-            )?
+    pub fn translate_type(
+        &self,
+        location: &Location,
+        path: &SymbolPath,
+        src_type: &Type,
+    ) -> CompilerResult<AnyTypeEnum<'ctx>> {
+        if let Type::Alias(aliased_type) = src_type {
+            let resolved_type = self
+                .ir_builder
+                .ir_value_storage
+                .find_global_type(path, aliased_type.as_ref());
+            if let Some(res_type) = resolved_type {
+                return Ok(res_type);
+            }
         };
 
-        let arg_value_enum = arg_value.as_basic_value_enum();
-        call_args.push(arg_value_enum.into());
+        let resolved_type = self
+            .ir_builder
+            .symbol_table
+            .resolve_type_alias(path, src_type.clone())
+            .to_comp_res(*location)?;
+
+        Ok(visit_type!(
+            *location,
+            self.ir_builder.context,
+            &resolved_type,
+            value,
+            Ok(value.into())
+        )?)
     }
-    Ok(())
+
+    pub fn build_get_element_ptr(
+        &self,
+        location: Location,
+        path: &SymbolPath,
+        ptr_type: &Type,
+        ptr: PointerValue<'ctx>,
+        indices: &[IntValue<'ctx>],
+        name: &str,
+    ) -> CompilerResult<PointerValue<'ctx>> {
+        let translated_type = self
+            .translate_type(&location, path, ptr_type)?
+            .to_basic_type()
+            .to_comp_res_with_desc(location, "invalid type")?;
+
+        unsafe {
+            self.ir_builder
+                .builder
+                .build_gep(translated_type, ptr, indices, name)
+                .to_comp_res(location)
+        }
+    }
 }
 
 impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
@@ -375,8 +535,8 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
     fn visit_const_decl(&mut self, node: &ConstDeclNode, path: &SymbolPath) -> CompilerResult<()> {
         let sym_path = path.sub(&node.name);
         let sym = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_by_path(&sym_path)
             .to_comp_res_with_desc(node.location, "internal error")?;
         let basic_value = self.evaluate_compile_time_value(
@@ -384,8 +544,8 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             sym.data_type.clone(),
             node.value.as_ref(),
         )?;
-        self.gen
-            .addrtable
+        self.ir_builder
+            .ir_value_storage
             .register_basic_value(sym_path, basic_value);
         Ok(())
     }
@@ -394,26 +554,25 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         for param in &node.params {
             if param.is_ref {
-                args.push(self.gen.context.ptr_type(AddressSpace::from(0)).into());
+                args.push(
+                    self.ir_builder
+                        .context
+                        .ptr_type(AddressSpace::from(0))
+                        .into(),
+                );
             } else {
-                let resolved_type = self
-                    .gen
-                    .symtable
-                    .resolve_type_alias(path, param.arg_type.clone())
-                    .to_comp_res(node.location)?;
-                visit_type!(
-                    param.location,
-                    self.gen.context,
-                    &resolved_type,
-                    value,
-                    Ok(args.push(value.into()))
-                )?;
+                args.push(
+                    self.translate_type(&node.location, path, &param.arg_type)?
+                        .to_basic_type()
+                        .to_comp_res_with_desc(node.location, "invalid type")?
+                        .into(),
+                );
             }
         }
 
         let fn_type = visit_any_type!(
             node.location,
-            self.gen.context,
+            self.ir_builder.context,
             &node.ret_type,
             value,
             Ok(value.fn_type(&args[..], false))
@@ -426,34 +585,48 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
 
         let sub_path = node.sub_path(path)?;
 
-        let function = self
-            .gen
-            .module
-            .add_function(&node.effective_name()?, fn_type, linkage);
-        self.gen.addrtable.register_func(sub_path.clone(), function);
+        let function =
+            self.ir_builder
+                .module
+                .add_function(&node.effective_name()?, fn_type, linkage);
+        self.ir_builder
+            .ir_value_storage
+            .register_func(sub_path.clone(), function);
 
         match &node.scope {
             Some(scope) => {
-                let basic_block = self.gen.context.append_basic_block(function, &node.name);
-                self.gen.builder.position_at_end(basic_block);
+                let basic_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(function, &node.name);
+                self.ir_builder.builder.position_at_end(basic_block);
 
-                for (path, sym) in self.gen.symtable.iterate_path(&sub_path) {
+                for (path, sym) in self.ir_builder.symbol_table.iterate_path(&sub_path) {
                     match sym.sym_type {
                         SymbolType::LocalVariable => {
-                            let resolved_type = self
-                                .gen
-                                .symtable
-                                .resolve_type_alias(path, sym.data_type.clone())
-                                .to_comp_res(node.location)?;
-                            let addr =
-                                self.gen
-                                    .alloc_var(sym.location, &resolved_type, &sym.name)?;
-                            self.gen.addrtable.register_ptr(path.clone(), addr);
+                            let translated_type = self
+                                .translate_type(&sym.location, path, &sym.data_type)?
+                                .to_basic_type()
+                                .to_comp_res_with_desc(sym.location, "invalid type")?;
+                            let addr = self
+                                .ir_builder
+                                .builder
+                                .build_alloca(translated_type, &sym.name)
+                                .to_comp_res(sym.location)?;
+
+                            self.ir_builder
+                                .ir_value_storage
+                                .register_ptr(path.clone(), addr);
                         }
                         SymbolType::LocalReference => {
-                            let addr =
-                                self.gen.alloc_var(sym.location, &Type::RawPtr, &sym.name)?;
-                            self.gen.addrtable.register_ptr(path.clone(), addr);
+                            let addr = self.ir_builder.alloc_var(
+                                sym.location,
+                                &Type::RawPtr,
+                                &sym.name,
+                            )?;
+                            self.ir_builder
+                                .ir_value_storage
+                                .register_ptr(path.clone(), addr);
                         }
                         _ => {}
                     }
@@ -473,8 +646,40 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         Ok(())
     }
 
-    fn visit_struct(&mut self, _: &StructNode, _: &SymbolPath) -> CompilerResult<()> {
-        Ok(())
+    fn visit_struct(&mut self, node: &StructNode, path: &SymbolPath) -> CompilerResult<()> {
+        let struct_path = path.sub(&node.name);
+        let symbol = self
+            .ir_builder
+            .symbol_table
+            .find_by_path(&struct_path)
+            .to_comp_res_with_desc(node.location, "failed to find struct symbol")?;
+
+        if let Type::Struct(struct_type) = &symbol.data_type {
+            let struct_name = format!("perun.struct.{}", node.name);
+            let ir_type = self
+                .ir_builder
+                .context
+                .opaque_struct_type(struct_name.as_ref());
+
+            let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
+            for field in &struct_type.fields {
+                basic_types.push(
+                    field
+                        .to_llvm_basic_type(self.ir_builder.context)
+                        .to_comp_res_with_desc(node.location, "failed to deduce type")?,
+                );
+            }
+
+            ir_type.set_body(basic_types.as_slice(), false);
+
+            self.ir_builder
+                .ir_value_storage
+                .register_type(struct_path, ir_type.into());
+
+            Ok(())
+        } else {
+            compiler_err!(node.location, "failed struct")
+        }
     }
 
     fn visit_import(&mut self, node: &ImportNode, path: &SymbolPath) -> CompilerResult<()> {
@@ -485,43 +690,46 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
             for arg in &func.args {
                 if arg.is_ref {
-                    args.push(self.gen.context.ptr_type(AddressSpace::from(0)).into());
+                    args.push(
+                        self.ir_builder
+                            .context
+                            .ptr_type(AddressSpace::from(0))
+                            .into(),
+                    );
                 } else {
-                    let resolved_type = self
-                        .gen
-                        .symtable
-                        .resolve_type_alias(path, Type::from_string(&arg.arg_type))
-                        .to_comp_res(node.location)?;
-                    visit_type!(
-                        node.location,
-                        self.gen.context,
-                        &resolved_type,
-                        value,
-                        Ok(args.push(value.into()))
-                    )?;
+                    args.push(
+                        self.translate_type(
+                            &node.location,
+                            path,
+                            &Type::from_string(&arg.arg_type),
+                        )?
+                        .to_basic_type()
+                        .to_comp_res_with_desc(node.location, "invalid type")?
+                        .into(),
+                    );
                 }
             }
 
             let ret_type = self
-                .gen
-                .symtable
+                .ir_builder
+                .symbol_table
                 .resolve_type_alias(path, Type::from_string(&func.return_type))
                 .to_comp_res(node.location)?;
 
             let fn_type = visit_any_type!(
                 node.location,
-                self.gen.context,
+                self.ir_builder.context,
                 &ret_type,
                 value,
                 Ok(value.fn_type(&args[..], false))
             )?;
 
             let function =
-                self.gen
+                self.ir_builder
                     .module
                     .add_function(&func.name, fn_type, Some(Linkage::External));
-            self.gen
-                .addrtable
+            self.ir_builder
+                .ir_value_storage
                 .register_func(path.sub(&func.name), function);
         }
         Ok(())
@@ -544,8 +752,8 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
     ) -> CompilerResult<()> {
         let msg = format!("unable to find function type {}", pd.path);
         let func_symbol = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_by_path(&pd.path)
             .to_comp_res_with_desc(node.location, &msg)?;
 
@@ -561,13 +769,13 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                             value_type: ValueType::RValue,
                         },
                     )?;
-                    self.gen
+                    self.ir_builder
                         .builder
                         .build_return(Some(value.as_ref()))
                         .to_comp_res(node.location)?;
                 }
                 None => {
-                    self.gen
+                    self.ir_builder
                         .builder
                         .build_return(None)
                         .to_comp_res(node.location)?;
@@ -586,19 +794,14 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
     ) -> CompilerResult<()> {
         if let Some(expr) = &node.expression {
             let symbol = self
-                .gen
-                .symtable
+                .ir_builder
+                .symbol_table
                 .find_symbol(&pd.path, &node.name)
                 .to_comp_res(node.location)?;
             let addr = *self
-                .gen
-                .addrtable
+                .ir_builder
+                .ir_value_storage
                 .find_symbol(&pd.path, &node.name)
-                .to_comp_res(node.location)?;
-            let resolved_type = self
-                .gen
-                .symtable
-                .resolve_type_alias(&pd.path, symbol.data_type.clone())
                 .to_comp_res(node.location)?;
 
             let value = self.translate_with_cast(
@@ -606,20 +809,20 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 &ExpressionPayload {
                     path: pd.path.clone(),
                     function: pd.function,
-                    expected_type: resolved_type,
+                    expected_type: symbol.data_type.clone(),
                     value_type: ValueType::RValue,
                 },
             )?;
 
             if symbol.data_type.is_int_type() {
                 let int_value = value.as_ref().to_int(node.location)?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_store(addr, int_value)
                     .to_comp_res(node.location)?;
             } else if symbol.data_type == Type::RawPtr {
                 let ptr_value = value.as_ref().to_ptr(node.location)?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_store(addr, ptr_value)
                     .to_comp_res(node.location)?;
@@ -636,19 +839,14 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &Self::Payload,
     ) -> CompilerResult<()> {
         let symbol = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_symbol(&pd.path, &node.name)
             .to_comp_res(node.location)?;
         let addr = *self
-            .gen
-            .addrtable
+            .ir_builder
+            .ir_value_storage
             .find_symbol(&pd.path, &node.name)
-            .to_comp_res(node.location)?;
-        let resolved_type = self
-            .gen
-            .symtable
-            .resolve_type_alias(&pd.path, symbol.data_type.clone())
             .to_comp_res(node.location)?;
 
         let value = self.visit_expression(
@@ -656,13 +854,13 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             &ExpressionPayload {
                 path: pd.path.clone(),
                 function: pd.function,
-                expected_type: resolved_type,
+                expected_type: symbol.data_type.clone(),
                 value_type: ValueType::LValue,
             },
         )?;
 
         let ptr_value = value.as_ref().to_ptr(node.location)?;
-        self.gen
+        self.ir_builder
             .builder
             .build_store(addr, ptr_value)
             .to_comp_res(node.location)?;
@@ -672,25 +870,28 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
 
     fn visit_if_node(&mut self, node: &IfNode, pd: &StatementPayload<'ctx>) -> CompilerResult<()> {
         let current_block = self
-            .gen
+            .ir_builder
             .builder
             .get_insert_block()
             .to_comp_res_with_desc(node.location, "statement not located in a valid block")?;
 
-        let ifthen = self.translate_scope(
+        let if_true_block = self.translate_scope(
             &node.then_scope,
             &StatementPayload {
                 path: pd.path.sub(&node.then_scope.name),
                 function: pd.function,
             },
         )?;
-        let ifend = self.gen.context.append_basic_block(pd.function, "if.end");
-        self.gen
+        let if_end_block = self
+            .ir_builder
+            .context
+            .append_basic_block(pd.function, "if.end");
+        self.ir_builder
             .builder
-            .build_unconditional_branch(ifend)
+            .build_unconditional_branch(if_end_block)
             .to_comp_res(node.location)?;
 
-        let ifelse = if let Some(else_scope) = &node.else_scope {
+        let if_false_block = if let Some(else_scope) = &node.else_scope {
             let scope = self.translate_scope(
                 else_scope,
                 &StatementPayload {
@@ -698,25 +899,25 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     function: pd.function,
                 },
             )?;
-            self.gen
+            self.ir_builder
                 .builder
-                .build_unconditional_branch(ifend)
+                .build_unconditional_branch(if_end_block)
                 .to_comp_res(node.location)?;
             scope
         } else {
-            ifend
+            if_end_block
         };
 
-        self.gen.builder.position_at_end(current_block);
+        self.ir_builder.builder.position_at_end(current_block);
         self.translate_to_boolean(
             node.condition.as_ref(),
             &pd.path,
             &pd.function,
-            ifthen,
-            ifelse,
+            if_true_block,
+            if_false_block,
         )?;
 
-        self.gen.builder.position_at_end(ifend);
+        self.ir_builder.builder.position_at_end(if_end_block);
 
         Ok(())
     }
@@ -727,14 +928,14 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &StatementPayload<'ctx>,
     ) -> CompilerResult<()> {
         let while_cond = self
-            .gen
+            .ir_builder
             .context
             .append_basic_block(pd.function, "while.cond");
-        self.gen
+        self.ir_builder
             .builder
             .build_unconditional_branch(while_cond)
             .to_comp_res(node.location)?;
-        self.gen.builder.position_at_end(while_cond);
+        self.ir_builder.builder.position_at_end(while_cond);
 
         let while_body = self.translate_scope(
             &node.scope,
@@ -744,17 +945,17 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             },
         )?;
 
-        self.gen
+        self.ir_builder
             .builder
             .build_unconditional_branch(while_cond)
             .to_comp_res(node.location)?;
 
         let while_end = self
-            .gen
+            .ir_builder
             .context
             .append_basic_block(pd.function, "while.end");
 
-        self.gen.builder.position_at_end(while_cond);
+        self.ir_builder.builder.position_at_end(while_cond);
         self.translate_to_boolean(
             node.condition.as_ref(),
             &pd.path,
@@ -763,7 +964,7 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             while_end,
         )?;
 
-        self.gen.builder.position_at_end(while_end);
+        self.ir_builder.builder.position_at_end(while_end);
 
         Ok(())
     }
@@ -805,8 +1006,8 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         let symbol = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_symbol(&pd.path, &node.name)
             .to_comp_res(node.location)?;
         match symbol.sym_type {
@@ -819,61 +1020,50 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     let arg_ptr = arg_expr.to_ptr(symbol.location)?;
                     match pd.value_type {
                         ValueType::LValue => Ok(Box::new(arg_ptr)),
-                        ValueType::RValue => Ok(Box::new(self.gen.load_var(
+                        ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
                             node.location,
                             &symbol.data_type,
                             &arg_ptr,
                             node.name.as_ref(),
                         )?)),
-                        ValueType::None => Ok(self.gen.null_ptr()),
+                        ValueType::None => Ok(self.ir_builder.null_ptr()),
                     }
                 } else {
                     Ok(Box::new(arg_expr))
                 }
             }
             SymbolType::LocalVariable => {
-                let (sym, ptr) =
-                    self.gen
-                        .find_symbol_with_addr(node.location, &pd.path, node.name.as_ref())?;
+                let (sym, ptr) = self.ir_builder.find_symbol_with_addr(
+                    node.location,
+                    &pd.path,
+                    node.name.as_ref(),
+                )?;
                 let data_type = self
-                    .gen
-                    .symtable
+                    .ir_builder
+                    .symbol_table
                     .resolve_type_alias(&pd.path, sym.data_type.clone())
                     .to_comp_res(node.location)?;
-                match pd.value_type {
-                    ValueType::LValue => Ok(Box::new(*ptr)),
-                    ValueType::RValue => Ok(Box::new(self.gen.load_var(
-                        node.location,
-                        &data_type,
-                        ptr,
-                        node.name.as_ref(),
-                    )?)),
-                    ValueType::None => Ok(self.gen.null_ptr()),
-                }
+                self.load_value(node, &data_type, &pd.value_type, ptr)
             }
             SymbolType::LocalReference => {
-                let (sym, ptr) =
-                    self.gen
-                        .find_symbol_with_addr(node.location, &pd.path, node.name.as_ref())?;
-                let loaded_ptr_var =
-                    self.gen
-                        .load_var(node.location, &Type::RawPtr, ptr, node.name.as_ref())?;
+                let (sym, ptr) = self.ir_builder.find_symbol_with_addr(
+                    node.location,
+                    &pd.path,
+                    node.name.as_ref(),
+                )?;
+                let loaded_ptr_var = self.ir_builder.load_var(
+                    node.location,
+                    &Type::RawPtr,
+                    ptr,
+                    node.name.as_ref(),
+                )?;
                 let loaded_ptr = loaded_ptr_var.to_ptr(node.location)?;
-                match pd.value_type {
-                    ValueType::LValue => Ok(Box::new(loaded_ptr)),
-                    ValueType::RValue => Ok(Box::new(self.gen.load_var(
-                        node.location,
-                        &sym.data_type,
-                        &loaded_ptr,
-                        node.name.as_ref(),
-                    )?)),
-                    ValueType::None => Ok(self.gen.null_ptr()),
-                }
+                self.load_value(node, &sym.data_type, &pd.value_type, &loaded_ptr)
             }
             SymbolType::ConstantDef => {
                 let basic_val = self
-                    .gen
-                    .addrtable
+                    .ir_builder
+                    .ir_value_storage
                     .find_basic_value(&pd.path, &node.name)
                     .to_comp_res_with_desc(node.location, "unable to find value")?;
                 Ok(Box::new(basic_val.as_basic_value_enum()))
@@ -889,7 +1079,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         _: &NullNode,
         _: &ExpressionPayload,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        Ok(self.gen.null_ptr())
+        Ok(self.ir_builder.null_ptr())
     }
 
     fn visit_self(
@@ -898,8 +1088,8 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         let sym = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_symbol(&pd.path, "self")
             .to_comp_res(node.location)?;
         if let SymbolType::FunctionArg(index, _) = sym.sym_type {
@@ -918,10 +1108,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &NumberNode,
         pd: &ExpressionPayload,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        if pd.value_type == ValueType::LValue {
-            return compiler_err!(node.location, "tried to interpret a number as an l-value");
-        }
-
+        assert_eq!(pd.value_type, ValueType::RValue);
         self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
     }
 
@@ -935,14 +1122,17 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         }
 
         let arr = self
-            .gen
+            .ir_builder
             .context
             .i8_type()
             .array_type(node.value.len() as u32);
-        let global_val = self.gen.module.add_global(arr, None, "str");
+        let global_val = self.ir_builder.module.add_global(arr, None, "str");
         global_val.set_constant(true);
 
-        let str_val = self.gen.context.const_string(node.value.as_bytes(), true);
+        let str_val = self
+            .ir_builder
+            .context
+            .const_string(node.value.as_bytes(), true);
         global_val.set_initializer(&str_val);
 
         Ok(Box::new(global_val.as_pointer_value()))
@@ -962,8 +1152,14 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
 
         match node.operation {
             BinaryOperation::LogicalAnd => {
-                let and_block = self.gen.context.append_basic_block(pd.function, "and.pred");
-                let end_block = self.gen.context.append_basic_block(pd.function, "end.pred");
+                let and_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(pd.function, "and.pred");
+                let end_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(pd.function, "end.pred");
 
                 let left = self.translate_with_cast(
                     node.left.as_ref(),
@@ -976,16 +1172,16 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 )?;
                 let left_int = left.as_ref().to_int(*node.get_location())?;
                 let left_block = self
-                    .gen
+                    .ir_builder
                     .builder
                     .get_insert_block()
                     .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_conditional_branch(left_int, and_block, end_block)
                     .to_comp_res(*node.get_location())?;
 
-                self.gen.builder.position_at_end(and_block);
+                self.ir_builder.builder.position_at_end(and_block);
 
                 let right = self.translate_with_cast(
                     node.right.as_ref(),
@@ -998,32 +1194,41 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 )?;
 
                 let right_block = self
-                    .gen
+                    .ir_builder
                     .builder
                     .get_insert_block()
                     .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_unconditional_branch(end_block)
                     .to_comp_res(node.location)?;
 
-                self.gen.builder.position_at_end(end_block);
+                self.ir_builder.builder.position_at_end(end_block);
 
                 let result = self
-                    .gen
+                    .ir_builder
                     .builder
-                    .build_phi(self.gen.context.bool_type(), "and.result")
+                    .build_phi(self.ir_builder.context.bool_type(), "and.result")
                     .to_comp_res(node.location)?;
                 result.add_incoming(&[
-                    (&self.gen.context.bool_type().const_zero(), left_block),
+                    (
+                        &self.ir_builder.context.bool_type().const_zero(),
+                        left_block,
+                    ),
                     (right.as_ref(), right_block),
                 ]);
 
                 return Ok(Box::new(result.as_basic_value()));
             }
             BinaryOperation::LogicalOr => {
-                let or_block = self.gen.context.append_basic_block(pd.function, "or.pred");
-                let end_block = self.gen.context.append_basic_block(pd.function, "end.pred");
+                let or_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(pd.function, "or.pred");
+                let end_block = self
+                    .ir_builder
+                    .context
+                    .append_basic_block(pd.function, "end.pred");
 
                 let left = self.translate_with_cast(
                     node.left.as_ref(),
@@ -1037,16 +1242,16 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
 
                 let left_int = left.as_ref().to_int(*node.get_location())?;
                 let left_block = self
-                    .gen
+                    .ir_builder
                     .builder
                     .get_insert_block()
                     .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_conditional_branch(left_int, end_block, or_block)
                     .to_comp_res(*node.get_location())?;
 
-                self.gen.builder.position_at_end(or_block);
+                self.ir_builder.builder.position_at_end(or_block);
 
                 let right = self.translate_with_cast(
                     node.right.as_ref(),
@@ -1058,25 +1263,25 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     },
                 )?;
                 let right_block = self
-                    .gen
+                    .ir_builder
                     .builder
                     .get_insert_block()
                     .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.gen
+                self.ir_builder
                     .builder
                     .build_unconditional_branch(end_block)
                     .to_comp_res(node.location)?;
 
-                self.gen.builder.position_at_end(end_block);
+                self.ir_builder.builder.position_at_end(end_block);
 
                 let result = self
-                    .gen
+                    .ir_builder
                     .builder
-                    .build_phi(self.gen.context.bool_type(), "or.result")
+                    .build_phi(self.ir_builder.context.bool_type(), "or.result")
                     .to_comp_res(node.location)?;
                 result.add_incoming(&[
                     (
-                        &self.gen.context.bool_type().const_int(1, false),
+                        &self.ir_builder.context.bool_type().const_int(1, false),
                         left_block,
                     ),
                     (right.as_ref(), right_block),
@@ -1090,7 +1295,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         // For assigment we always expect the left hand side to be an l-value.
         let left_value_type = node.get_left_value_type();
 
-        let (operand_type, _) = TypeDeductionPass::new(self.gen.symtable)
+        let (operand_type, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
             .deduce_operand_and_out_type_for_binary_expression(
                 node,
                 &crate::type_deduction_pass::Payload {
@@ -1119,7 +1324,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
 
         node.operation.build(
-            self.gen,
+            self.ir_builder,
             &node.location,
             &operand_type,
             left.as_ref(),
@@ -1164,14 +1369,14 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     ValueType::LValue => Ok(ptr_box),
                     ValueType::RValue => {
                         let ptr = ptr_box.as_ref().to_ptr(node.location)?;
-                        Ok(Box::new(self.gen.load_var(
+                        Ok(Box::new(self.ir_builder.load_var(
                             node.location,
                             &pd.expected_type,
                             &ptr,
                             "deref",
                         )?))
                     }
-                    ValueType::None => Ok(self.gen.null_ptr()),
+                    ValueType::None => Ok(self.ir_builder.null_ptr()),
                 }
             }
             SingularOperation::Not => {
@@ -1186,11 +1391,11 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 )?;
                 let expr_int = expr_value.as_ref().to_int(node.location)?;
                 let result = self
-                    .gen
+                    .ir_builder
                     .builder
                     .build_xor(
                         expr_int,
-                        self.gen.context.bool_type().const_int(1, false),
+                        self.ir_builder.context.bool_type().const_int(1, false),
                         "not.result",
                     )
                     .to_comp_res(node.location)?;
@@ -1208,10 +1413,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 )?;
                 let expr_int = expr_value.as_ref().to_int(node.location)?;
                 let result = self
-                    .gen
+                    .ir_builder
                     .builder
                     .build_int_sub(
-                        self.gen.context.i32_type().const_int(0, false),
+                        self.ir_builder.context.i32_type().const_int(0, false),
                         expr_int,
                         "minus.result",
                     )
@@ -1226,26 +1431,18 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &FunctionCall,
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        if pd.value_type == ValueType::LValue {
-            return compiler_err!(
-                node.location,
-                "tried to interpret function call as an l-value"
-            );
-        }
+        assert_ne!(pd.value_type, ValueType::LValue);
 
         let symbol = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_symbol(&pd.path, &node.name)
             .to_comp_res(node.location)?;
         if let Type::Function(fn_type) = &symbol.data_type {
-            if fn_type.args.len() != node.args.len() {
-                return compiler_err!(node.location, "invalid number of arguments");
-            }
+            assert_eq!(fn_type.args.len(), node.args.len());
 
             let mut call_args = Vec::<BasicMetadataValueEnum>::new();
-            collect_function_call_args(
-                self,
+            self.collect_function_call_args(
                 &pd.path,
                 &pd.function,
                 &fn_type,
@@ -1255,12 +1452,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             )?;
 
             let func = self
-                .gen
-                .addrtable
+                .ir_builder
+                .ir_value_storage
                 .find_func(&pd.path, &node.name)
                 .to_comp_res_with_desc(node.location, "no function found.")?;
             let call_res = self
-                .gen
+                .ir_builder
                 .builder
                 .build_call(*func, call_args.as_ref(), node.name.as_ref())
                 .to_comp_res(node.location)?;
@@ -1269,7 +1466,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             if let Either::Left(call_res_bv) = res {
                 Ok(Box::new(call_res_bv))
             } else {
-                Ok(self.gen.null_ptr())
+                Ok(self.ir_builder.null_ptr())
             }
         } else {
             compiler_err!(
@@ -1310,8 +1507,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
         let index = index_value.as_ref().to_int(node.location)?;
 
-        let indexed_ptr = self.gen.build_get_element_ptr(
+        let indexed_ptr = self.build_get_element_ptr(
             node.location,
+            &pd.path,
             &pd.expected_type,
             obj_ptr,
             &[index],
@@ -1319,13 +1517,13 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
         match pd.value_type {
             ValueType::LValue => Ok(Box::<PointerValue<'ctx>>::new(indexed_ptr.into())),
-            ValueType::RValue => Ok(Box::<BasicValueEnum<'ctx>>::new(self.gen.load_var(
+            ValueType::RValue => Ok(Box::<BasicValueEnum<'ctx>>::new(self.ir_builder.load_var(
                 node.location,
                 &pd.expected_type,
                 &indexed_ptr,
                 "addrvalue",
             )?)),
-            ValueType::None => Ok(self.gen.null_ptr()),
+            ValueType::None => Ok(self.ir_builder.null_ptr()),
         }
     }
 
@@ -1339,39 +1537,38 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             pd.expected_type.clone(),
             node.object_expr.as_ref(),
         )?;
-        let obj_resolved = self
-            .gen
-            .symtable
-            .resolve_type_alias(&pd.path, obj_type.clone())
-            .to_comp_res(node.location)?;
         let obj = self.visit_expression(
             node.object_expr.as_ref(),
             &ExpressionPayload {
                 path: pd.path.clone(),
                 function: pd.function,
-                expected_type: obj_resolved.clone(),
+                expected_type: obj_type.clone(),
                 value_type: ValueType::LValue,
             },
         )?;
 
-        let sym = node.get_symbol(self.gen.symtable, &pd.path, &obj_type)?;
+        let sym = node.get_symbol(self.ir_builder.symbol_table, &pd.path, &obj_type)?;
 
         if let SymbolType::StructField(id) = sym.sym_type {
             match obj.as_ref().as_basic_value_enum() {
                 BasicValueEnum::PointerValue(ptr) => {
-                    let field_ptr = self.gen.build_get_element_ptr(
+                    let field_ptr = self.build_get_element_ptr(
                         node.location,
-                        &obj_resolved,
+                        &pd.path,
+                        &obj_type,
                         ptr,
                         &[
-                            self.gen.context.i32_type().const_int(0, true),
-                            self.gen.context.i32_type().const_int(id as u64, true),
+                            self.ir_builder.context.i32_type().const_int(0, true),
+                            self.ir_builder
+                                .context
+                                .i32_type()
+                                .const_int(id as u64, true),
                         ],
                         &node.field_name,
                     )?;
                     match pd.value_type {
                         ValueType::LValue => Ok(Box::new(field_ptr)),
-                        ValueType::RValue => Ok(Box::new(self.gen.load_var(
+                        ValueType::RValue => Ok(Box::new(self.ir_builder.load_var(
                             node.location,
                             &sym.data_type,
                             &field_ptr,
@@ -1381,7 +1578,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     }
                 }
                 BasicValueEnum::StructValue(struct_val) => Ok(Box::new(
-                    self.gen
+                    self.ir_builder
                         .builder
                         .build_extract_value(struct_val, id as u32, "extracted")
                         .to_comp_res(node.location)?,
@@ -1414,8 +1611,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             },
         )?;
 
-        self.gen
-            .build_cast(node.location, &source_type, &node.target_type, expr)
+        self.build_cast(node.location, &source_type, &node.target_type, expr)
     }
 
     fn visit_method_call(&self, node: &MethodCall, pd: &Self::Payload) -> Self::VisitResult {
@@ -1424,11 +1620,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             pd.expected_type.clone(),
             node.object_expr.as_ref(),
         )?;
-        let method_path = node.get_method_path(self.gen.symtable, &pd.path, &obj_type)?;
+        let method_path =
+            node.get_method_path(self.ir_builder.symbol_table, &pd.path, &obj_type)?;
 
         let method = self
-            .gen
-            .symtable
+            .ir_builder
+            .symbol_table
             .find_by_path(&method_path)
             .to_comp_res_with_desc(node.location, "unknown method")?;
 
@@ -1451,8 +1648,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
 
             let mut call_args = Vec::<BasicMetadataValueEnum<'ctx>>::new();
             call_args.push(receiver.as_basic_value_enum().into());
-            collect_function_call_args(
-                self,
+            self.collect_function_call_args(
                 &pd.path,
                 &pd.function,
                 &fn_type,
@@ -1462,12 +1658,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             )?;
 
             let func = self
-                .gen
-                .addrtable
+                .ir_builder
+                .ir_value_storage
                 .find_func(&method_path.parent(), &node.name)
                 .to_comp_res_with_desc(node.location, "no function found.")?;
             let call_res = self
-                .gen
+                .ir_builder
                 .builder
                 .build_call(*func, call_args.as_ref(), node.name.as_ref())
                 .to_comp_res(node.location)?;
@@ -1476,7 +1672,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             if let Either::Left(call_res_bv) = res {
                 Ok(Box::new(call_res_bv))
             } else {
-                Ok(self.gen.null_ptr())
+                Ok(self.ir_builder.null_ptr())
             }
         } else {
             compiler_err!(node.location, "invalid function type")

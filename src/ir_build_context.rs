@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::address_table::AddressTable;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
+use crate::ir_value_storage::IRValueStorage;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::Location;
 use crate::typing::Type;
@@ -12,13 +12,14 @@ use inkwell::module::Module;
 use inkwell::targets::{FileType, RelocMode, Target, TargetMachine, TargetMachineOptions};
 use inkwell::types::AnyTypeEnum;
 use inkwell::values::{BasicValue, BasicValueEnum, IntValue, PointerValue};
-use inkwell::{IntPredicate, OptimizationLevel};
+use inkwell::OptimizationLevel;
 
 type MainFunc = unsafe extern "C" fn() -> i32;
 
 pub trait BasicValueExtension<'ctx> {
     fn to_int(&self, location: Location) -> CompilerResult<IntValue<'ctx>>;
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>>;
+    #[allow(dead_code)]
     fn is_ptr(&self) -> bool;
 }
 
@@ -76,17 +77,17 @@ pub struct IRBuildContext<'ctx, 'st> {
     pub context: &'ctx Context,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
-    pub exe: ExecutionEngine<'ctx>,
-    pub symtable: &'st SymbolTable,
-    pub addrtable: AddressTable<'ctx>,
-    pub machine: TargetMachine,
+    pub execution_engine: ExecutionEngine<'ctx>,
+    pub symbol_table: &'st SymbolTable,
+    pub ir_value_storage: IRValueStorage<'ctx>,
+    pub target_machine: TargetMachine,
 }
 
 impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
-    pub fn new(context: &'ctx Context, symtable: &'st SymbolTable) -> Self {
+    pub fn new(context: &'ctx Context, symbol_table: &'st SymbolTable) -> Self {
         let module = context.create_module("output");
         let builder = context.create_builder();
-        let exe: ExecutionEngine = module
+        let execution_engine: ExecutionEngine = module
             .create_jit_execution_engine(OptimizationLevel::None)
             .unwrap();
         let triple = TargetMachine::get_default_triple();
@@ -100,10 +101,10 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
             context,
             module,
             builder,
-            exe,
-            symtable,
-            addrtable: AddressTable::new(),
-            machine: target
+            execution_engine,
+            symbol_table,
+            ir_value_storage: IRValueStorage::new(),
+            target_machine: target
                 .create_target_machine_from_options(&triple, target_config)
                 .unwrap(),
         }
@@ -114,11 +115,16 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
     }
 
     pub fn run(&mut self) -> i32 {
-        unsafe { self.exe.get_function::<MainFunc>("main").unwrap().call() }
+        unsafe {
+            self.execution_engine
+                .get_function::<MainFunc>("main")
+                .unwrap()
+                .call()
+        }
     }
 
     pub fn compile(&self, file: FileType, path: &Path) {
-        self.machine
+        self.target_machine
             .write_to_file(&self.module, file, path)
             .unwrap();
     }
@@ -154,21 +160,6 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
             value,
             self.builder.build_alloca(value, name).to_comp_res(location)
         )
-    }
-
-    pub fn build_get_element_ptr(
-        &self,
-        location: Location,
-        ptr_type: &Type,
-        ptr: PointerValue<'ctx>,
-        indicies: &[IntValue<'ctx>],
-        name: &str,
-    ) -> CompilerResult<PointerValue<'ctx>> {
-        visit_type!(location, self.context, ptr_type, value, unsafe {
-            self.builder
-                .build_gep(value, ptr, indicies, name)
-                .to_comp_res(location)
-        })
     }
 
     pub fn build_sext(
@@ -222,11 +213,11 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         name: &str,
     ) -> CompilerResult<(&SymbolInfo, &PointerValue<'ctx>)> {
         let sym = self
-            .symtable
+            .symbol_table
             .find_symbol(path, name)
             .to_comp_res(location)?;
         let ptr = self
-            .addrtable
+            .ir_value_storage
             .find_symbol(path, name)
             .to_comp_res(location)?;
         Ok((sym, ptr))
@@ -234,54 +225,5 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
 
     pub fn null_ptr(&self) -> Box<dyn BasicValue<'ctx> + 'ctx> {
         Box::new(self.context.ptr_type(0.into()).const_null())
-    }
-
-    pub fn build_cast(
-        &self,
-        location: Location,
-        source_type: &Type,
-        target_type: &Type,
-        value: Box<dyn BasicValue<'ctx> + 'ctx>,
-    ) -> CompilerResult<Box<dyn BasicValue<'ctx> + 'ctx>> {
-        if *source_type == *target_type {
-            return Ok(value);
-        }
-
-        if !source_type.is_int_type() {
-            compiler_err!(location, "source cast must be an int");
-        }
-
-        let int_value = value.as_ref().to_int(location)?;
-
-        if target_type.is_bool_type() {
-            Ok(Box::new(
-                self.builder
-                    .build_int_compare(
-                        IntPredicate::NE,
-                        int_value,
-                        self.context.i32_type().const_int(0, true),
-                        "tobool",
-                    )
-                    .to_comp_res(location)?,
-            ))
-        } else if target_type.is_int_type() {
-            if target_type.byte_count() > source_type.byte_count() {
-                Ok(Box::new(self.build_sext(
-                    location,
-                    target_type,
-                    int_value,
-                    "intsext",
-                )?))
-            } else {
-                Ok(Box::new(self.build_trunc(
-                    location,
-                    target_type,
-                    int_value,
-                    "inttrunc",
-                )?))
-            }
-        } else {
-            compiler_err!(location, "unsupported cast target type");
-        }
     }
 }
