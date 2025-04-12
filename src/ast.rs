@@ -1,13 +1,16 @@
 use crate::error::{CompilerResult, CompilerResultErrorMapper};
 use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
-use crate::symbols::{SymbolPath, SymbolTable};
+use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, ValueType};
 
 use inkwell::basic_block::BasicBlock;
-use inkwell::module::Linkage;
-use inkwell::values::{BasicValue, FunctionValue};
+use inkwell::values::FunctionValue;
 use inkwell::IntPredicate;
+
+fn create_method_name(receiver: &str, name: &str) -> String {
+    format!("perun.method.{}.{}", receiver, name)
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOperation {
@@ -151,149 +154,50 @@ impl AnyOperation {
     }
 }
 
-pub type BasicValueBox<'ctx> = Box<dyn BasicValue<'ctx> + 'ctx>;
-
-pub trait GlobalStatementNode<'ctx, 'st>: std::fmt::Debug {
-    fn generate(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-    ) -> CompilerResult<()>;
-    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()>;
-}
-
-pub trait StatementNode<'ctx, 'st>: std::fmt::Debug {
-    fn generate(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-        function: &FunctionValue<'ctx>,
-    ) -> CompilerResult<()>;
-    fn collect_symbols(&self, path: &SymbolPath, symtable: &mut SymbolTable) -> CompilerResult<()>;
-    fn to_any_statement_node<'stmt>(&'stmt self) -> AnyStatementNode<'stmt, 'ctx, 'st>;
-}
-
-pub trait ExpressionNode<'ctx, 'st>: std::fmt::Debug {
-    fn generate(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-        function: &FunctionValue<'ctx>,
-        expected_type: &Type,
-        value_type: &ValueType,
-    ) -> CompilerResult<BasicValueBox<'ctx>>;
-    fn deduce_type(
-        &self,
-        symtable: &SymbolTable,
-        path: &SymbolPath,
-        expected_type: &Type,
-    ) -> CompilerResult<Type>;
+pub trait LocatedNode {
     fn get_location(&self) -> &Location;
-
-    fn build_boolean_branch(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-        function: &FunctionValue<'ctx>,
-        true_block: BasicBlock<'ctx>,
-        false_block: BasicBlock<'ctx>,
-    ) -> CompilerResult<()> {
-        let value = self.generate_casted(gen, path, function, &Type::Bool, &ValueType::RValue)?;
-        let value_int = value.as_ref().to_int(*self.get_location())?;
-        gen.builder
-            .build_conditional_branch(value_int, true_block, false_block)
-            .to_comp_res(*self.get_location())?;
-        Ok(())
-    }
-
-    fn generate_boolean(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-        function: &FunctionValue<'ctx>,
-        true_block: BasicBlock<'ctx>,
-        false_block: BasicBlock<'ctx>,
-    ) -> CompilerResult<()> {
-        self.build_boolean_branch(gen, path, function, true_block, false_block)
-    }
-
-    fn generate_casted(
-        &self,
-        gen: &mut IRBuildContext<'ctx, 'st>,
-        path: &SymbolPath,
-        function: &FunctionValue<'ctx>,
-        expected_type: &Type,
-        value_type: &ValueType,
-    ) -> CompilerResult<BasicValueBox<'ctx>> {
-        let stmt = self.generate(gen, path, function, expected_type, value_type)?;
-        if *value_type == ValueType::LValue {
-            Ok(stmt)
-        } else {
-            let deduced_type = self.deduce_type(&gen.symtable, path, expected_type)?;
-            gen.build_cast(*self.get_location(), &deduced_type, expected_type, stmt)
-        }
-    }
-
-    fn to_constexpr_value(
-        &self,
-        _: &mut IRBuildContext<'ctx, 'st>,
-        _: &SymbolPath,
-        _: &Type,
-    ) -> CompilerResult<BasicValueBox<'ctx>> {
-        compiler_err!(
-            *self.get_location(),
-            "expression cannot be resolved at compile time"
-        );
-    }
 }
 
-#[derive(Debug)]
-pub enum AnyStatementNode<'stmt, 'ctx, 'st> {
-    ReturnNode(&'stmt ReturnNode<'ctx, 'st>),
-    VarDeclNode(&'stmt VarDeclNode<'ctx, 'st>),
-    RefDeclNode(&'stmt RefDeclNode<'ctx, 'st>),
-    IfNode(&'stmt IfNode<'ctx, 'st>),
-    WhileNode(&'stmt WhileNode<'ctx, 'st>),
-    ExpressionStatementNode(&'stmt ExpressionStatementNode<'ctx, 'st>),
-}
-
-trait StatementVisitor<'ctx, 'st> {
-    type Payload;
-
-    fn visit_return_node(&self, node: &ReturnNode<'ctx, 'st>, pd: &Self::Payload);
-    fn visit_var_decl_node(&self, node: &VarDeclNode<'ctx, 'st>, pd: &Self::Payload);
-    fn visit_ref_decl_node(&self, node: &RefDeclNode<'ctx, 'st>, pd: &Self::Payload);
-    fn visit_if_node(&self, node: &IfNode<'ctx, 'st>, pd: &Self::Payload);
-    fn visit_while_node(&self, node: &WhileNode<'ctx, 'st>, pd: &Self::Payload);
-    fn visit_expression_statement_node(&self, node: &ExpressionStatementNode<'ctx, 'st>, pd: &Self::Payload);
-}
-
-pub type ExpressionBox<'ctx, 'st> = Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>;
+pub type GlobalStatementBox = Box<AnyGlobalStatement>;
+pub type StatementBox = Box<AnyStatementNode>;
+pub type ExpressionBox = Box<AnyExpressionNode>;
 
 // **********************************
 // ******** GLOBAL STATEMENTS *******
 // **********************************
 
-#[derive(Debug)]
-pub struct SourceUnit<'ctx, 'st> {
-    pub body: Vec<Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx>>,
+#[derive(Debug, Clone)]
+pub struct SourceUnit {
+    pub body: Vec<Box<AnyGlobalStatement>>,
 }
 
-#[derive(Debug)]
-pub struct ScopeNode<'ctx, 'st> {
-    pub body: Vec<Box<dyn StatementNode<'ctx, 'st> + 'ctx>>,
-    pub name: String,
+impl Into<AnyGlobalStatement> for &SourceUnit {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::SourceUnit(self.clone())
+    }
 }
 
-#[derive(Debug)]
-pub struct ConstDeclNode<'ctx, 'st> {
+#[derive(Debug, Clone)]
+pub struct ConstDeclNode {
     pub location: Location,
     pub name: String,
     pub const_type: Option<Type>,
-    pub value: ExpressionBox<'ctx, 'st>,
+    pub value: ExpressionBox,
 }
 
-#[derive(Debug)]
+impl LocatedNode for ConstDeclNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &ConstDeclNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::ConstDecl(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FunctionArg {
     pub location: Location,
     pub name: String,
@@ -301,168 +205,670 @@ pub struct FunctionArg {
     pub is_ref: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FunctionLinkage {
     Standard,
     External,
 }
 
-#[derive(Debug)]
-pub struct FunctionNode<'ctx, 'st> {
+#[derive(Debug, Clone)]
+pub struct FunctionNode {
     pub location: Location,
     pub self_type: Option<Type>,
     pub name: String,
     pub params: Vec<FunctionArg>,
     pub ret_type: Type,
     pub linkage: FunctionLinkage,
-    pub scope: Option<ScopeNode<'ctx, 'st>>,
+    pub scope: Option<ScopeNode>,
 }
 
-#[derive(Debug)]
+impl<'ctx, 'st> FunctionNode {
+    pub fn sub_path(&self, path: &SymbolPath) -> CompilerResult<SymbolPath> {
+        if let Some(self_type) = &self.self_type {
+            match self_type {
+                Type::Alias(alias) => Ok(path.sub(alias).sub(&self.name)),
+                _ => compiler_err!(self.location, "invalid type"),
+            }
+        } else {
+            Ok(path.sub(&self.name))
+        }
+    }
+
+    pub fn effective_name(&self) -> CompilerResult<String> {
+        if let Some(self_type) = &self.self_type {
+            match self_type {
+                Type::Alias(alias) => Ok(create_method_name(alias, &self.name)),
+                _ => compiler_err!(self.location, "invalid type"),
+            }
+        } else {
+            Ok(self.name.clone())
+        }
+    }
+}
+
+impl LocatedNode for FunctionNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &FunctionNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Function(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StructField {
     pub location: Location,
     pub name: String,
     pub field_type: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructNode {
     pub location: Location,
     pub name: String,
     pub fields: Vec<StructField>,
 }
 
-#[derive(Debug)]
+impl LocatedNode for StructNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &StructNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Struct(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ImportNode {
     pub location: Location,
     pub module_name: String,
+}
+
+impl LocatedNode for ImportNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &ImportNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Import(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AnyGlobalStatement {
+    SourceUnit(SourceUnit),
+    ConstDecl(ConstDeclNode),
+    Function(FunctionNode),
+    Struct(StructNode),
+    Import(ImportNode),
+}
+
+pub trait GlobalStatementVisitor {
+    type Payload;
+    type VisitResult;
+
+    fn visit_source_unit(&mut self, node: &SourceUnit, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_const_decl(&mut self, node: &ConstDeclNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_function(&mut self, node: &FunctionNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_struct(&mut self, node: &StructNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_import(&mut self, node: &ImportNode, pd: &Self::Payload) -> Self::VisitResult;
+
+    fn visit_global_statement(
+        &mut self,
+        node: &AnyGlobalStatement,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult {
+        match node {
+            AnyGlobalStatement::SourceUnit(node) => self.visit_source_unit(node, pd),
+            AnyGlobalStatement::ConstDecl(node) => self.visit_const_decl(node, pd),
+            AnyGlobalStatement::Function(node) => self.visit_function(node, pd),
+            AnyGlobalStatement::Struct(node) => self.visit_struct(node, pd),
+            AnyGlobalStatement::Import(node) => self.visit_import(node, pd),
+        }
+    }
 }
 
 // **********************************
 // ********** STATEMENTS ************
 // **********************************
 
-#[derive(Debug)]
-pub struct ReturnNode<'ctx, 'st> {
-    pub location: Location,
-    pub expression: Option<ExpressionBox<'ctx, 'st>>,
+#[derive(Debug, Clone)]
+pub struct ScopeNode {
+    pub body: Vec<Box<AnyStatementNode>>,
+    pub name: String,
 }
 
-#[derive(Debug)]
-pub struct VarDeclNode<'ctx, 'st> {
+#[derive(Debug, Clone)]
+pub struct ReturnNode {
+    pub location: Location,
+    pub expression: Option<ExpressionBox>,
+}
+
+impl LocatedNode for ReturnNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyStatementNode> for &ReturnNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::ReturnNode(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VarDeclNode {
     pub location: Location,
     pub name: String,
-    pub expression: Option<ExpressionBox<'ctx, 'st>>,
+    pub expression: Option<ExpressionBox>,
     pub var_type: Option<Type>,
 }
 
-#[derive(Debug)]
-pub struct RefDeclNode<'ctx, 'st> {
+impl LocatedNode for VarDeclNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyStatementNode> for &VarDeclNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::VarDeclNode(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RefDeclNode {
     pub location: Location,
     pub name: String,
-    pub expression: ExpressionBox<'ctx, 'st>,
+    pub expression: ExpressionBox,
     pub var_type: Option<Type>,
 }
 
-#[derive(Debug)]
-pub struct IfNode<'ctx, 'st> {
-    pub location: Location,
-    pub condition: ExpressionBox<'ctx, 'st>,
-    pub then_scope: ScopeNode<'ctx, 'st>,
-    pub else_scope: Option<ScopeNode<'ctx, 'st>>,
+impl LocatedNode for RefDeclNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
 }
 
-#[derive(Debug)]
-pub struct WhileNode<'ctx, 'st> {
-    pub location: Location,
-    pub condition: ExpressionBox<'ctx, 'st>,
-    pub scope: ScopeNode<'ctx, 'st>,
+impl Into<AnyStatementNode> for &RefDeclNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::RefDeclNode(self.clone())
+    }
 }
 
-#[derive(Debug)]
-pub struct ExpressionStatementNode<'ctx, 'st> {
-    pub expression: ExpressionBox<'ctx, 'st>,
+#[derive(Debug, Clone)]
+pub struct IfNode {
+    pub location: Location,
+    pub condition: ExpressionBox,
+    pub then_scope: ScopeNode,
+    pub else_scope: Option<ScopeNode>,
+}
+
+impl LocatedNode for IfNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyStatementNode> for &IfNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::IfNode(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WhileNode {
+    pub location: Location,
+    pub condition: ExpressionBox,
+    pub scope: ScopeNode,
+}
+
+impl LocatedNode for WhileNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyStatementNode> for &WhileNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::WhileNode(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpressionStatementNode {
+    pub expression: ExpressionBox,
+}
+
+impl LocatedNode for ExpressionStatementNode {
+    fn get_location(&self) -> &Location {
+        self.expression.get_location()
+    }
+}
+
+impl Into<AnyStatementNode> for &ExpressionStatementNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::ExpressionStatementNode(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AnyStatementNode {
+    ReturnNode(ReturnNode),
+    VarDeclNode(VarDeclNode),
+    RefDeclNode(RefDeclNode),
+    IfNode(IfNode),
+    WhileNode(WhileNode),
+    ExpressionStatementNode(ExpressionStatementNode),
+}
+
+impl LocatedNode for AnyStatementNode {
+    fn get_location(&self) -> &Location {
+        match self {
+            AnyStatementNode::ReturnNode(node) => node.get_location(),
+            AnyStatementNode::VarDeclNode(node) => node.get_location(),
+            AnyStatementNode::RefDeclNode(node) => node.get_location(),
+            AnyStatementNode::IfNode(node) => node.get_location(),
+            AnyStatementNode::WhileNode(node) => node.get_location(),
+            AnyStatementNode::ExpressionStatementNode(node) => node.get_location(),
+        }
+    }
+}
+
+pub trait StatementVisitor {
+    type Payload;
+    type VisitResult;
+
+    fn visit_return_node(&mut self, node: &ReturnNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_var_decl_node(&mut self, node: &VarDeclNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_ref_decl_node(&mut self, node: &RefDeclNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_if_node(&mut self, node: &IfNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_while_node(&mut self, node: &WhileNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_expression_statement_node(
+        &mut self,
+        node: &ExpressionStatementNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult;
+
+    fn visit_statement(
+        &mut self,
+        any_node: &AnyStatementNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult {
+        match any_node {
+            AnyStatementNode::ReturnNode(node) => self.visit_return_node(node, pd),
+            AnyStatementNode::VarDeclNode(node) => self.visit_var_decl_node(node, pd),
+            AnyStatementNode::RefDeclNode(node) => self.visit_ref_decl_node(node, pd),
+            AnyStatementNode::IfNode(node) => self.visit_if_node(node, pd),
+            AnyStatementNode::WhileNode(node) => self.visit_while_node(node, pd),
+            AnyStatementNode::ExpressionStatementNode(node) => {
+                self.visit_expression_statement_node(node, pd)
+            }
+        }
+    }
 }
 
 // **********************************
 // ********** EXPRESSIONS ***********
 // **********************************
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IdentifierNode {
     pub location: Location,
     pub name: String,
 }
 
-#[derive(Debug)]
+impl LocatedNode for IdentifierNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &IdentifierNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Identifier(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct NullNode {
     pub location: Location,
 }
 
-#[derive(Debug)]
+impl LocatedNode for NullNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &NullNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Null(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SelfNode {
     pub location: Location,
 }
 
-#[derive(Debug)]
+impl LocatedNode for SelfNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &SelfNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::SelfN(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct NumberNode {
     pub location: Location,
     pub number: u64,
 }
 
-#[derive(Debug)]
+impl LocatedNode for NumberNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &NumberNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Number(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StringNode {
     pub location: Location,
     pub value: String,
 }
 
-#[derive(Debug)]
-pub struct BinaryExpressionNode<'ctx, 'st> {
+impl LocatedNode for StringNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &StringNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::String(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryExpressionNode {
     pub location: Location,
     pub operation: BinaryOperation,
-    pub left: ExpressionBox<'ctx, 'st>,
-    pub right: ExpressionBox<'ctx, 'st>,
+    pub left: ExpressionBox,
+    pub right: ExpressionBox,
 }
 
-#[derive(Debug)]
-pub struct SingularExpressionNode<'ctx, 'st> {
+impl BinaryExpressionNode {
+    pub fn get_left_value_type(&self) -> ValueType {
+        match self.operation {
+            BinaryOperation::Assign => ValueType::LValue,
+            _ => ValueType::RValue,
+        }
+    }
+}
+
+impl LocatedNode for BinaryExpressionNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &BinaryExpressionNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::BinaryExpression(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SingularExpressionNode {
     pub location: Location,
     pub operation: SingularOperation,
-    pub expr: ExpressionBox<'ctx, 'st>,
+    pub expr: ExpressionBox,
 }
 
-#[derive(Debug)]
-pub struct FunctionCall<'ctx, 'st> {
+impl LocatedNode for SingularExpressionNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &SingularExpressionNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::SingularExpression(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionCall {
     pub location: Location,
     pub name: String,
-    pub args: Vec<ExpressionBox<'ctx, 'st>>,
+    pub args: Vec<ExpressionBox>,
 }
 
-#[derive(Debug)]
-pub struct GetElementNode<'ctx, 'st> {
+impl LocatedNode for FunctionCall {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &FunctionCall {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::FunctionCall(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GetElementNode {
     pub location: Location,
-    pub object: ExpressionBox<'ctx, 'st>,
-    pub index: ExpressionBox<'ctx, 'st>,
+    pub object: ExpressionBox,
+    pub index: ExpressionBox,
 }
 
-#[derive(Debug)]
-pub struct CastNode<'ctx, 'st> {
+impl LocatedNode for GetElementNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &GetElementNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::GetElement(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CastNode {
     pub location: Location,
     pub target_type: Type,
-    pub expr: ExpressionBox<'ctx, 'st>,
+    pub expr: ExpressionBox,
 }
 
-#[derive(Debug)]
-pub struct GetFieldNode<'ctx, 'st> {
+impl LocatedNode for CastNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &CastNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Cast(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GetFieldNode {
     pub location: Location,
-    pub object_expr: ExpressionBox<'ctx, 'st>,
+    pub object_expr: ExpressionBox,
     pub field_name: String,
 }
 
-#[derive(Debug)]
-pub struct MethodCall<'ctx, 'st> {
+impl GetFieldNode {
+    pub fn get_symbol<'st>(
+        &self,
+        symbol_table: &'st SymbolTable,
+        path: &SymbolPath,
+        obj_type: &Type,
+    ) -> CompilerResult<&'st SymbolInfo> {
+        if let Type::Alias(alias) = &obj_type {
+            let alias_path = symbol_table
+                .find_symbol_path(path, alias)
+                .to_comp_res(self.location)?;
+            let symbol = symbol_table
+                .find_symbol(&alias_path, &self.field_name)
+                .to_comp_res(self.location)?;
+            Ok(symbol)
+        } else {
+            compiler_err!(self.location, "invalid object type");
+        }
+    }
+}
+
+impl LocatedNode for GetFieldNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &GetFieldNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::GetField(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MethodCall {
     pub location: Location,
-    pub object_expr: ExpressionBox<'ctx, 'st>,
+    pub object_expr: ExpressionBox,
     pub name: String,
-    pub args: Vec<ExpressionBox<'ctx, 'st>>,
+    pub args: Vec<ExpressionBox>,
+}
+
+impl MethodCall {
+    pub fn get_method_path(
+        &self,
+        symtable: &SymbolTable,
+        path: &SymbolPath,
+        obj_type: &Type,
+    ) -> CompilerResult<SymbolPath> {
+        if let Type::Alias(alias) = obj_type {
+            let receiver_path = symtable
+                .find_symbol_path(path, alias)
+                .to_comp_res(self.location)?;
+            Ok(receiver_path.sub(&self.name))
+        } else {
+            compiler_err!(self.location, "invalid object type")
+        }
+    }
+}
+
+impl LocatedNode for MethodCall {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &MethodCall {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::MethodCall(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AnyExpressionNode {
+    Identifier(IdentifierNode),
+    Null(NullNode),
+    SelfN(SelfNode),
+    Number(NumberNode),
+    String(StringNode),
+    BinaryExpression(BinaryExpressionNode),
+    SingularExpression(SingularExpressionNode),
+    FunctionCall(FunctionCall),
+    GetElement(GetElementNode),
+    GetField(GetFieldNode),
+    Cast(CastNode),
+    MethodCall(MethodCall),
+}
+
+impl LocatedNode for AnyExpressionNode {
+    fn get_location(&self) -> &Location {
+        match self {
+            AnyExpressionNode::Identifier(node) => node.get_location(),
+            AnyExpressionNode::Null(node) => node.get_location(),
+            AnyExpressionNode::SelfN(node) => node.get_location(),
+            AnyExpressionNode::Number(node) => node.get_location(),
+            AnyExpressionNode::String(node) => node.get_location(),
+            AnyExpressionNode::BinaryExpression(node) => node.get_location(),
+            AnyExpressionNode::SingularExpression(node) => node.get_location(),
+            AnyExpressionNode::FunctionCall(node) => node.get_location(),
+            AnyExpressionNode::GetElement(node) => node.get_location(),
+            AnyExpressionNode::GetField(node) => node.get_location(),
+            AnyExpressionNode::Cast(node) => node.get_location(),
+            AnyExpressionNode::MethodCall(node) => node.get_location(),
+        }
+    }
+}
+
+pub trait ExpressionVisitor {
+    type Payload;
+    type VisitResult;
+
+    fn visit_identifier(&self, node: &IdentifierNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_null(&self, node: &NullNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_self(&self, node: &SelfNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_number(&self, node: &NumberNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_string(&self, node: &StringNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_binary_expression(
+        &self,
+        node: &BinaryExpressionNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult;
+    fn visit_singular_expression(
+        &self,
+        node: &SingularExpressionNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult;
+    fn visit_function_call(&self, node: &FunctionCall, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_get_element(&self, node: &GetElementNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_get_field(&self, node: &GetFieldNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_cast(&self, node: &CastNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_method_call(&self, node: &MethodCall, pd: &Self::Payload) -> Self::VisitResult;
+
+    fn visit_expression(
+        &self,
+        any_expression: &AnyExpressionNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult {
+        match any_expression {
+            AnyExpressionNode::Identifier(node) => self.visit_identifier(node, pd),
+            AnyExpressionNode::Null(node) => self.visit_null(node, pd),
+            AnyExpressionNode::SelfN(node) => self.visit_self(node, pd),
+            AnyExpressionNode::Number(node) => self.visit_number(node, pd),
+            AnyExpressionNode::String(node) => self.visit_string(node, pd),
+            AnyExpressionNode::BinaryExpression(node) => self.visit_binary_expression(node, pd),
+            AnyExpressionNode::SingularExpression(node) => self.visit_singular_expression(node, pd),
+            AnyExpressionNode::FunctionCall(node) => self.visit_function_call(node, pd),
+            AnyExpressionNode::GetElement(node) => self.visit_get_element(node, pd),
+            AnyExpressionNode::GetField(node) => self.visit_get_field(node, pd),
+            AnyExpressionNode::Cast(node) => self.visit_cast(node, pd),
+            AnyExpressionNode::MethodCall(node) => self.visit_method_call(node, pd),
+        }
+    }
 }

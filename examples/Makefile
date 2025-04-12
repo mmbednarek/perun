@@ -17,6 +17,9 @@ $(BUILD_DIR)/snake.o: $(BUILD_DIR) snake.pr
 $(BUILD_DIR)/linked_list.o: $(BUILD_DIR) linked_list.pr
 	$(PERUNC) linked_list.pr -o $(BUILD_DIR)/linked_list.o
 
+$(BUILD_DIR)/method_test.o: $(BUILD_DIR) method_test.pr
+	$(PERUNC) method_test.pr -o $(BUILD_DIR)/method_test.o
+
 $(BUILD_DIR)/snake: $(BUILD_DIR)/snake.o $(BUILD_DIR)/corelib.o
 	gcc $(BUILD_DIR)/snake.o $(BUILD_DIR)/corelib.o -lSDL2 -o $(BUILD_DIR)/snake
 

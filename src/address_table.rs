@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
-use crate::{error::SymbolLookupError, symbols::SymbolPath};
 use crate::error::SymbolLookupResult;
-use inkwell::values::{PointerValue, FunctionValue, BasicValue};
+use crate::{error::SymbolLookupError, symbols::SymbolPath};
+use inkwell::values::{BasicValue, FunctionValue, PointerValue};
+use std::collections::BTreeMap;
 
 pub struct AddressTable<'ctx> {
     pointers: BTreeMap<SymbolPath, PointerValue<'ctx>>,
@@ -11,7 +11,11 @@ pub struct AddressTable<'ctx> {
 
 impl<'ctx> AddressTable<'ctx> {
     pub fn new() -> Self {
-        Self{pointers: BTreeMap::new(), functions: BTreeMap::new(), basic_values: BTreeMap::new()}
+        Self {
+            pointers: BTreeMap::new(),
+            functions: BTreeMap::new(),
+            basic_values: BTreeMap::new(),
+        }
     }
 
     pub fn register_ptr(&mut self, path: SymbolPath, ptr: PointerValue<'ctx>) {
@@ -22,11 +26,19 @@ impl<'ctx> AddressTable<'ctx> {
         self.functions.insert(path, func);
     }
 
-    pub fn register_basic_value(&mut self, path: SymbolPath, basic_value: Box<dyn BasicValue<'ctx> + 'ctx>) {
+    pub fn register_basic_value(
+        &mut self,
+        path: SymbolPath,
+        basic_value: Box<dyn BasicValue<'ctx> + 'ctx>,
+    ) {
         self.basic_values.insert(path, basic_value);
     }
 
-    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&PointerValue<'ctx>> {
+    pub fn find_symbol(
+        &self,
+        lookup_path: &SymbolPath,
+        name: &str,
+    ) -> SymbolLookupResult<&PointerValue<'ctx>> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
@@ -54,7 +66,11 @@ impl<'ctx> AddressTable<'ctx> {
         None
     }
 
-    pub fn find_basic_value(&self, lookup_path: &SymbolPath, name: &str) -> Option<&dyn BasicValue<'ctx>> {
+    pub fn find_basic_value(
+        &self,
+        lookup_path: &SymbolPath,
+        name: &str,
+    ) -> Option<&dyn BasicValue<'ctx>> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
@@ -68,4 +84,3 @@ impl<'ctx> AddressTable<'ctx> {
         None
     }
 }
-

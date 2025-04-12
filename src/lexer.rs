@@ -1,6 +1,6 @@
+use crate::token::{Keyword, Location, OperatorType, Token, TokenType};
 use std::io::Read;
 use std::mem::take;
-use crate::token::{Location, OperatorType, Token, TokenType, Keyword};
 
 fn is_wide_space(ch: char) -> bool {
     match ch {
@@ -34,19 +34,22 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(reader: Box<dyn Read>) -> Lexer {
-        Lexer{
+        Lexer {
             reader,
             out_tokens: Vec::new(),
             current_token: String::new(),
             state: LexState::Global,
             pending_op: None,
-            token_start: Location{line: 1, column: 1},
-            current_location: Location{line: 1, column: 1},
+            token_start: Location { line: 1, column: 1 },
+            current_location: Location { line: 1, column: 1 },
         }
     }
 
     fn push_token(&mut self, token: TokenType) {
-        self.out_tokens.push(Token{token_type: token, location: self.token_start});
+        self.out_tokens.push(Token {
+            token_type: token,
+            location: self.token_start,
+        });
         self.token_start = self.current_location;
     }
 
@@ -96,66 +99,64 @@ impl Lexer {
                     self.state = LexState::Global;
                     self.push_token(TokenType::Operator(OperatorType::Slash));
                 }
-            },
+            }
             LexState::CommentSingleLine => {
                 if ch == '\n' {
                     self.state = LexState::Global;
                 }
-            },
-            LexState::String => {
-                match ch {
-                    '"' => {
-                        self.state = LexState::Global;
-                        let str_token = TokenType::String(take(&mut self.current_token));
-                        self.push_token(str_token);
-                    },
-                    '\\' => {
-                        self.state = LexState::StringEscape;
-                    },
-                    _ => {
-                        self.current_token.push(ch);
-                    },
+            }
+            LexState::String => match ch {
+                '"' => {
+                    self.state = LexState::Global;
+                    let str_token = TokenType::String(take(&mut self.current_token));
+                    self.push_token(str_token);
+                }
+                '\\' => {
+                    self.state = LexState::StringEscape;
+                }
+                _ => {
+                    self.current_token.push(ch);
                 }
             },
             LexState::StringEscape => {
                 match ch {
                     'n' => {
                         self.current_token.push('\n');
-                    },
+                    }
                     '\\' => {
                         self.current_token.push('\\');
-                    },
+                    }
                     'r' => {
                         self.current_token.push('\r');
-                    },
+                    }
                     't' => {
                         self.current_token.push('\t');
-                    },
+                    }
                     '"' => {
                         self.current_token.push('\"');
-                    },
+                    }
                     _ => {
                         self.current_token.push(ch);
-                    },
+                    }
                 };
                 self.state = LexState::String;
-            },
+            }
             LexState::Global => {
                 if is_wide_space(ch) {
                     self.handle_identifier();
-                    return 
+                    return;
                 }
 
                 if ch == '/' {
                     self.handle_identifier();
                     self.state = LexState::PreComment;
-                    return
+                    return;
                 }
 
                 if ch == '"' {
                     self.handle_identifier();
                     self.state = LexState::String;
-                    return
+                    return;
                 }
 
                 if let Some(op) = OperatorType::from_char(ch) {
@@ -166,11 +167,11 @@ impl Lexer {
                     } else {
                         self.push_token(TokenType::Operator(op));
                     }
-                    return 
+                    return;
                 }
 
                 self.current_token.push(ch);
-            },
+            }
             LexState::ReadOperator => {
                 if let Some(pending_op) = self.pending_op {
                     if let Some(op) = OperatorType::from_char(ch) {
@@ -178,7 +179,7 @@ impl Lexer {
                             self.push_token(TokenType::Operator(joined));
                             self.pending_op = None;
                             return;
-                        } 
+                        }
                     }
 
                     self.push_token(TokenType::Operator(pending_op));
@@ -189,7 +190,6 @@ impl Lexer {
                 self.handle_char(ch);
             }
         }
-
     }
 
     pub fn read_tokens(&mut self) {
@@ -200,7 +200,7 @@ impl Lexer {
                 Err(_) => {
                     self.handle_identifier();
                     return;
-                },
+                }
             }
         }
     }

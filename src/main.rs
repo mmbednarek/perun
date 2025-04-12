@@ -1,6 +1,6 @@
-use std::{ffi::OsStr, fs::File, path::Path};
-use inkwell::context::Context;
 use clap::Parser as ClapParser;
+use inkwell::context::Context;
+use std::{ffi::OsStr, fs::File, path::Path};
 
 mod token;
 
@@ -14,7 +14,6 @@ mod token_reader;
 use token_reader::TokenReader;
 
 mod ast;
-use ast::GlobalStatementNode;
 
 mod parser;
 
@@ -25,13 +24,16 @@ mod ir_build_context;
 use ir_build_context::IRBuildContext;
 
 mod symbols;
-use symbols::{SymbolTable, SymbolPath};
+use crate::ast::GlobalStatementVisitor;
+use symbols::{SymbolPath, SymbolTable};
 
 mod address_table;
 
-mod llvm_generation;
-
+mod collect_symbols_pass;
+mod compile_time_evaluation_pass;
+mod ir_translation_pass;
 mod module_api;
+mod type_deduction_pass;
 
 #[derive(ClapParser, Debug)]
 #[command(name = "Perun Compiler")]
@@ -43,15 +45,15 @@ struct CliArgs {
     #[arg(short, long, default_value_t=("object.o").to_string())]
     output: String,
 
-    #[arg(short, long, default_value_t=false)]
+    #[arg(short, long, default_value_t = false)]
     run: bool,
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     print_tokens: bool,
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     print_ast: bool,
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     print_symbols: bool,
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     print_ir: bool,
 }
 
@@ -84,8 +86,14 @@ fn main() -> std::io::Result<()> {
 
         let parsed_res = parser.parse();
         if let Err(err) = &parsed_res {
-            eprintln!("Failed to parse input file (line {}, column {}): {}", err.location.line, err.location.column, err.message);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
+            eprintln!(
+                "Failed to parse input file (line {}, column {}): {}",
+                err.location.line, err.location.column, err.message
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "compilation failed",
+            ));
         }
 
         let parsed = parsed_res.unwrap();
@@ -93,12 +101,25 @@ fn main() -> std::io::Result<()> {
             println!("Parsed {:#?}", parsed);
         }
 
-        let basename = source_path.file_stem().unwrap_or(OsStr::new("root")).to_str().unwrap_or("root");
+        let basename = source_path
+            .file_stem()
+            .unwrap_or(OsStr::new("root"))
+            .to_str()
+            .unwrap_or("root");
         let path = SymbolPath::new(basename);
-        let collect_symbols_res = parsed.collect_symbols(&path, &mut sym_table);
+
+        let mut symbols_pass = collect_symbols_pass::CollectSymbolsPass::new(&mut sym_table);
+
+        let collect_symbols_res = symbols_pass.visit_global_statement(&(&parsed).into(), &path);
         if let Err(err) = &collect_symbols_res {
-            eprintln!("Failed to collect symbols (line {}, column {}): {}", err.location.line, err.location.column, err.message);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
+            eprintln!(
+                "Failed to collect symbols (line {}, column {}): {}",
+                err.location.line, err.location.column, err.message
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "compilation failed",
+            ));
         }
 
         if args.print_symbols {
@@ -106,10 +127,19 @@ fn main() -> std::io::Result<()> {
         }
 
         let mut generator = IRBuildContext::new(&il_context, &sym_table);
-        let generate_res = parsed.generate(&mut generator, &path);
+
+        let mut translation_pass = ir_translation_pass::IRTranslationPass::new(&mut generator);
+
+        let generate_res = translation_pass.visit_global_statement(&(&parsed).into(), &path);
         if let Err(err) = &generate_res {
-            eprintln!("Failed to compile input file (line {}, column {}): {}", err.location.line, err.location.column, err.message);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "compilation failed"));
+            eprintln!(
+                "Failed to compile input file (line {}, column {}): {}",
+                err.location.line, err.location.column, err.message
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "compilation failed",
+            ));
         }
 
         if args.print_ir {
@@ -119,7 +149,10 @@ fn main() -> std::io::Result<()> {
         if args.run {
             generator.run();
         } else {
-            generator.compile(inkwell::targets::FileType::Object, Path::new(args.output.as_str()));
+            generator.compile(
+                inkwell::targets::FileType::Object,
+                Path::new(args.output.as_str()),
+            );
         }
     }
 

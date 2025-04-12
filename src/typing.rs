@@ -1,6 +1,6 @@
 use crate::token::Keyword;
-use inkwell::types::{AnyTypeEnum, BasicTypeEnum, AnyType};
 use inkwell::context::Context;
+use inkwell::types::{AnyType, AnyTypeEnum, BasicTypeEnum};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncTypeArg<T> {
@@ -39,7 +39,10 @@ pub enum Type {
     Function(FuncTypeBox<Type>),
 }
 
-fn struct_to_llvm_type<'ctx>(ctx: &'ctx Context, struct_type: &StructType<Type>) -> Option<inkwell::types::StructType<'ctx>> {
+fn struct_to_llvm_type<'ctx>(
+    ctx: &'ctx Context,
+    struct_type: &StructType<Type>,
+) -> Option<inkwell::types::StructType<'ctx>> {
     let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
     for field in &struct_type.fields {
         basic_types.push(field.to_llvm_basic_type(ctx)?);
@@ -58,7 +61,6 @@ impl Type {
             "rawptr" => Type::RawPtr,
             _ => Type::Alias(s.into()),
         }
-
     }
 
     pub fn from_keyword(kw: &Keyword) -> Option<Type> {
@@ -78,7 +80,9 @@ impl Type {
 
     pub fn to_llvm_basic_type<'ctx>(&self, ctx: &'ctx Context) -> Option<BasicTypeEnum<'ctx>> {
         match self {
-            Type::RawPtr => Some(BasicTypeEnum::PointerType(ctx.ptr_type(inkwell::AddressSpace::from(0)))),
+            Type::RawPtr => Some(BasicTypeEnum::PointerType(
+                ctx.ptr_type(inkwell::AddressSpace::from(0)),
+            )),
             Type::Int8 => Some(BasicTypeEnum::IntType(ctx.i8_type())),
             Type::Int16 => Some(BasicTypeEnum::IntType(ctx.i16_type())),
             Type::Int32 => Some(BasicTypeEnum::IntType(ctx.i32_type())),
@@ -86,7 +90,10 @@ impl Type {
             Type::Float32 => Some(BasicTypeEnum::FloatType(ctx.f32_type())),
             Type::Float64 => Some(BasicTypeEnum::FloatType(ctx.f64_type())),
             Type::Bool => Some(BasicTypeEnum::IntType(ctx.bool_type())),
-            Type::Struct(struct_type) => Some(BasicTypeEnum::StructType(struct_to_llvm_type(ctx, struct_type.as_ref())?)),
+            Type::Struct(struct_type) => Some(BasicTypeEnum::StructType(struct_to_llvm_type(
+                ctx,
+                struct_type.as_ref(),
+            )?)),
             _ => None,
         }
     }
@@ -170,12 +177,18 @@ impl Type {
 #[macro_export]
 macro_rules! visit_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
-        match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
+        match $x
+            .to_llvm_type($ctx)
+            .to_comp_res_with_desc($loc, "failed to map llvm type")?
+        {
             AnyTypeEnum::PointerType($y) => $z,
             AnyTypeEnum::IntType($y) => $z,
             AnyTypeEnum::FloatType($y) => $z,
             AnyTypeEnum::StructType($y) => $z,
-            _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
+            _ => Err(crate::error::CompilerError {
+                location: $loc,
+                message: format!("failed to map to llvm type: {:?}", *$x),
+            }),
         }
     };
 }
@@ -183,13 +196,19 @@ macro_rules! visit_type {
 #[macro_export]
 macro_rules! visit_any_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
-        match wrap_option($loc, $x.to_llvm_type($ctx), "failed to map llvm type")? {
+        match $x
+            .to_llvm_type($ctx)
+            .to_comp_res_with_desc($loc, "failed to map llvm type")?
+        {
             AnyTypeEnum::PointerType($y) => $z,
             AnyTypeEnum::IntType($y) => $z,
             AnyTypeEnum::FloatType($y) => $z,
             AnyTypeEnum::StructType($y) => $z,
             AnyTypeEnum::VoidType($y) => $z,
-            _ => { Err(crate::error::CompilerError{location: $loc, message: format!("failed to map to llvm type: {:?}", *$x)}) },
+            _ => Err(crate::error::CompilerError {
+                location: $loc,
+                message: format!("failed to map to llvm type: {:?}", *$x),
+            }),
         }
     };
 }

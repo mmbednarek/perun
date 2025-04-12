@@ -1,5 +1,5 @@
 use crate::error::CompilerResult;
-use crate::token::{Token, TokenType, Location};
+use crate::token::{Location, Token, TokenType};
 
 pub struct TokenReader<'a> {
     tokens: &'a [Token],
@@ -8,7 +8,7 @@ pub struct TokenReader<'a> {
 
 impl<'a> TokenReader<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self{tokens, at: 0}
+        Self { tokens, at: 0 }
     }
 
     pub fn has_tokens(&self) -> bool {
@@ -18,7 +18,7 @@ impl<'a> TokenReader<'a> {
     pub fn next(&mut self) -> CompilerResult<&Token> {
         let index = self.at;
         if index >= self.tokens.len() {
-            compiler_err!(Location{line: 1, column: 1}, "unexpected and of stream");
+            compiler_err!(Location { line: 1, column: 1 }, "unexpected and of stream");
         }
 
         self.at += 1;
@@ -33,7 +33,7 @@ impl<'a> TokenReader<'a> {
 
     pub fn peek(&self) -> CompilerResult<&Token> {
         if self.at >= self.tokens.len() {
-            compiler_err!(Location{line: 1, column: 1}, "unexpected and of stream");
+            compiler_err!(Location { line: 1, column: 1 }, "unexpected and of stream");
         }
         Ok(&self.tokens[self.at])
     }
@@ -41,7 +41,12 @@ impl<'a> TokenReader<'a> {
     pub fn expect_token(&mut self, token_type: TokenType) -> CompilerResult<&Token> {
         let token = self.next()?;
         if token.token_type != token_type {
-            compiler_err!(token.location, "invalid token type {:?}, expected {:?}", token.token_type, token_type);
+            compiler_err!(
+                token.location,
+                "invalid token type {:?}, expected {:?}",
+                token.token_type,
+                token_type
+            );
         }
 
         Ok(token)
@@ -58,7 +63,7 @@ impl<'a> TokenReader<'a> {
         }
 
         self.at = pos;
-        compiler_err!(Location{line: 1, column: 1}, "unexpected and of stream")
+        compiler_err!(Location { line: 1, column: 1 }, "unexpected and of stream")
     }
 
     pub fn expect_identifier(&mut self) -> CompilerResult<String> {
@@ -72,7 +77,11 @@ impl<'a> TokenReader<'a> {
             return Ok((token.location, identifier.clone()));
         }
 
-        compiler_err!(token.location, "invalid token type {:?}, expected Identifier", token.token_type)
+        compiler_err!(
+            token.location,
+            "invalid token type {:?}, expected Identifier",
+            token.token_type
+        )
     }
 
     pub fn skip_token_if_present(&mut self, token_to_skip: TokenType) -> CompilerResult<bool> {
@@ -84,7 +93,10 @@ impl<'a> TokenReader<'a> {
         Ok(false)
     }
 
-    pub fn skip_token_if_present_with_loc(&mut self, token_to_skip: TokenType) -> CompilerResult<Option<Location>> {
+    pub fn skip_token_if_present_with_loc(
+        &mut self,
+        token_to_skip: TokenType,
+    ) -> CompilerResult<Option<Location>> {
         let token = self.peek()?;
         if token.token_type == token_to_skip {
             let loc = token.location.clone();

@@ -28,7 +28,9 @@ pub enum SymbolLookupError {
 impl SymbolLookupError {
     pub fn message(&self) -> String {
         match self {
-            Self::AlreadyRegistered(sym_name) => format!("symbol {} is already registered in this scope", sym_name),
+            Self::AlreadyRegistered(sym_name) => {
+                format!("symbol {} is already registered in this scope", sym_name)
+            }
             Self::NoSymbolFound(sym_name) => format!("symbol not found: {}", sym_name),
         }
     }
@@ -40,7 +42,10 @@ impl<T> CompilerResultErrorMapper for SymbolLookupResult<T> {
     type Value = T;
 
     fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value> {
-        self.map_err(|err| CompilerError{message: err.message(), location: loc})
+        self.map_err(|err| CompilerError {
+            message: err.message(),
+            location: loc,
+        })
     }
 }
 
@@ -51,7 +56,7 @@ macro_rules! compiler_err {
     }}
 }
 
-pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str)  -> CompilerResult<T> {
+pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str) -> CompilerResult<T> {
     if res.is_none() {
         println!("ERROR!");
     }
@@ -59,7 +64,7 @@ pub fn wrap_option<T>(loc: Location, res: Option<T>, msg: &str)  -> CompilerResu
         Some(value) => Ok(value),
         None => {
             compiler_err!(loc, "{}", msg);
-        },
+        }
     }
 }
 
@@ -67,7 +72,10 @@ impl<T> CompilerResultErrorMapper for Result<T, BuilderError> {
     type Value = T;
 
     fn to_comp_res(self, loc: Location) -> CompilerResult<Self::Value> {
-        self.map_err(|be| CompilerError{message: format!("builder error: {:?}", be), location: loc})
+        self.map_err(|be| CompilerError {
+            message: format!("builder error: {:?}", be),
+            location: loc,
+        })
     }
 }
 
@@ -79,7 +87,7 @@ impl<T> CompilerResultErrorMapperWithDesc for Option<T> {
             Some(value) => Ok(value),
             None => {
                 compiler_err!(loc, "{}", desc);
-            },
+            }
         }
     }
 }

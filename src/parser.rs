@@ -16,17 +16,14 @@ fn get_random_identifier(prefix: &str) -> String {
     format!("{}_{}", prefix, random_str)
 }
 
-struct ExpressionBuilder<'ctx, 'st>
-where
-    'st: 'ctx,
-{
-    expr_stack: Vec<Option<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>>>,
+struct ExpressionBuilder {
+    expr_stack: Vec<Option<Box<AnyExpressionNode>>>,
     op_stack: Vec<AnyOperation>,
     last_is_op: bool,
     location: Location,
 }
 
-impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
+impl ExpressionBuilder {
     fn new(location: Location) -> Self {
         Self {
             expr_stack: Vec::new(),
@@ -36,12 +33,12 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
         }
     }
 
-    fn push_expr<T: ExpressionNode<'ctx, 'st> + 'ctx>(&mut self, node: T) {
+    fn push_expr(&mut self, node: AnyExpressionNode) {
         self.expr_stack.push(Some(Box::new(node)));
         self.last_is_op = false;
     }
 
-    fn push_expr_box(&mut self, node: Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>) {
+    fn push_expr_box(&mut self, node: ExpressionBox) {
         self.expr_stack.push(Some(node));
         self.last_is_op = false;
     }
@@ -84,11 +81,14 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
                 }
                 let expr = expr_opt.unwrap().unwrap();
                 let location = *expr.get_location();
-                self.expr_stack.push(Some(Box::new(SingularExpressionNode {
-                    location,
-                    operation: sin_op,
-                    expr,
-                })));
+                self.expr_stack.push(Some(Box::new(
+                    (&SingularExpressionNode {
+                        location,
+                        operation: sin_op,
+                        expr,
+                    })
+                        .into(),
+                )));
             }
             AnyOperation::Binary(bin_op) => {
                 let right_opt = self.expr_stack.pop();
@@ -101,12 +101,15 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
                 let left = left_opt.unwrap().unwrap();
 
                 let location = *left.get_location();
-                self.expr_stack.push(Some(Box::new(BinaryExpressionNode {
-                    location,
-                    operation: bin_op,
-                    left,
-                    right,
-                })));
+                self.expr_stack.push(Some(Box::new(
+                    (&BinaryExpressionNode {
+                        location,
+                        operation: bin_op,
+                        left,
+                        right,
+                    })
+                        .into(),
+                )));
             }
             AnyOperation::None => {
                 compiler_err!(self.location, "invalid expression")
@@ -116,7 +119,7 @@ impl<'ctx, 'st> ExpressionBuilder<'ctx, 'st> {
         Ok(())
     }
 
-    fn build(&mut self) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
+    fn build(&mut self) -> CompilerResult<ExpressionBox> {
         while !self.op_stack.is_empty() {
             self.process_operator()?;
         }
@@ -145,7 +148,7 @@ where
         Self { reader }
     }
 
-    pub fn parse(&mut self) -> CompilerResult<SourceUnit<'ctx, 'st>> {
+    pub fn parse(&mut self) -> CompilerResult<SourceUnit> {
         let mut result = SourceUnit { body: Vec::new() };
 
         while self.reader.has_tokens() {
@@ -154,30 +157,32 @@ where
             if let TokenType::Keyword(kw) = &token.token_type {
                 match kw {
                     Keyword::Fn => {
-                        let func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> =
-                            Box::new(self.parse_function(location, FunctionLinkage::Standard)?);
+                        let func: GlobalStatementBox = Box::new(
+                            (&self.parse_function(location, FunctionLinkage::Standard)?).into(),
+                        );
                         result.body.push(func);
                     }
                     Keyword::Extern => {
                         self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
 
-                        let extern_func: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> =
-                            Box::new(self.parse_function(location, FunctionLinkage::External)?);
+                        let extern_func: GlobalStatementBox = Box::new(
+                            (&self.parse_function(location, FunctionLinkage::External)?).into(),
+                        );
                         result.body.push(extern_func);
                     }
                     Keyword::Const => {
-                        let const_expr: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> =
-                            Box::new(self.parse_const_decl(location)?);
+                        let const_expr: GlobalStatementBox =
+                            Box::new((&self.parse_const_decl(location)?).into());
                         result.body.push(const_expr);
                     }
                     Keyword::Struct => {
-                        let struct_node: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> =
-                            Box::new(self.parse_struct(location)?);
+                        let struct_node: GlobalStatementBox =
+                            Box::new((&self.parse_struct(location)?).into());
                         result.body.push(struct_node);
                     }
                     Keyword::Import => {
-                        let import_node: Box<dyn GlobalStatementNode<'ctx, 'st> + 'ctx> =
-                            Box::new(self.parse_import(location)?);
+                        let import_node: GlobalStatementBox =
+                            Box::new((&self.parse_import(location)?).into());
                         result.body.push(import_node);
                     }
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
@@ -192,7 +197,7 @@ where
         &mut self,
         location: Location,
         linkage: FunctionLinkage,
-    ) -> CompilerResult<FunctionNode<'ctx, 'st>> {
+    ) -> CompilerResult<FunctionNode> {
         let paren_or_dot = self.reader.find_one_of(&[
             TokenType::Operator(OperatorType::LeftParen),
             TokenType::Operator(OperatorType::Dot),
@@ -277,7 +282,7 @@ where
             let mut scope_node = self.parse_scope("entry")?;
 
             let is_last_stmt_ret = match scope_node.body.last() {
-                Some(stmt) => match stmt.to_any_statement_node() {
+                Some(stmt) => match stmt.as_ref() {
                     AnyStatementNode::ReturnNode(_) => true,
                     _ => false,
                 },
@@ -289,10 +294,13 @@ where
                     compiler_err!(location, "missing return at the end of function");
                 }
 
-                scope_node.body.push(Box::new(ReturnNode {
-                    location,
-                    expression: None,
-                }));
+                scope_node.body.push(Box::new(
+                    (&ReturnNode {
+                        location,
+                        expression: None,
+                    })
+                        .into(),
+                ));
             }
 
             Some(scope_node)
@@ -328,8 +336,8 @@ where
         }
     }
 
-    fn parse_scope(&mut self, name: &str) -> CompilerResult<ScopeNode<'ctx, 'st>> {
-        let mut scope = ScopeNode::<'ctx, 'st> {
+    fn parse_scope(&mut self, name: &str) -> CompilerResult<ScopeNode> {
+        let mut scope = ScopeNode {
             body: Vec::new(),
             name: name.to_string(),
         };
@@ -352,26 +360,32 @@ where
         Ok(scope)
     }
 
-    fn parse_statement(&mut self) -> CompilerResult<Box<dyn StatementNode<'ctx, 'st> + 'ctx>> {
+    fn parse_statement(&mut self) -> CompilerResult<StatementBox> {
         let token = self.reader.next()?;
         let location = token.location;
         if let TokenType::Keyword(kw) = &token.token_type {
             match kw {
                 Keyword::Return => {
                     let peek = self.reader.peek()?;
-                    if peek.token_type == TokenType::Operator(OperatorType::Semicolon) {
+                    return if peek.token_type == TokenType::Operator(OperatorType::Semicolon) {
                         self.reader.next()?;
-                        return Ok(Box::new(ReturnNode {
-                            location,
-                            expression: None,
-                        }));
+                        Ok(Box::new(
+                            (&ReturnNode {
+                                location,
+                                expression: None,
+                            })
+                                .into(),
+                        ))
                     } else {
                         let expression = self.parse_expression(OperatorType::Semicolon)?;
-                        return Ok(Box::new(ReturnNode {
-                            location,
-                            expression: Some(expression),
-                        }));
-                    }
+                        Ok(Box::new(
+                            (&ReturnNode {
+                                location,
+                                expression: Some(expression),
+                            })
+                                .into(),
+                        ))
+                    };
                 }
                 Keyword::Var => {
                     let name = self.reader.expect_identifier()?;
@@ -384,7 +398,7 @@ where
                         var_type = Some(self.parse_type()?);
                     }
 
-                    let mut expression: Option<ExpressionBox<'ctx, 'st>> = None;
+                    let mut expression: Option<ExpressionBox> = None;
                     let peek_value = self.reader.peek()?;
                     if peek_value.token_type == TokenType::Operator(OperatorType::Equals) {
                         self.reader.next()?;
@@ -394,12 +408,15 @@ where
                             .expect_token(TokenType::Operator(OperatorType::Semicolon))?;
                     }
 
-                    return Ok(Box::new(VarDeclNode {
-                        location,
-                        name,
-                        expression,
-                        var_type,
-                    }));
+                    return Ok(Box::new(
+                        (&VarDeclNode {
+                            location,
+                            name,
+                            expression,
+                            var_type,
+                        })
+                            .into(),
+                    ));
                 }
                 Keyword::Ref => {
                     let name = self.reader.expect_identifier()?;
@@ -417,18 +434,21 @@ where
 
                     let expression = self.parse_expression(OperatorType::Semicolon)?;
 
-                    return Ok(Box::new(RefDeclNode {
-                        location,
-                        name,
-                        expression,
-                        var_type,
-                    }));
+                    return Ok(Box::new(
+                        (&RefDeclNode {
+                            location,
+                            name,
+                            expression,
+                            var_type,
+                        })
+                            .into(),
+                    ));
                 }
                 Keyword::If => {
-                    return Ok(Box::new(self.parse_if_statement(location)?));
+                    return Ok(Box::new((&self.parse_if_statement(location)?).into()));
                 }
                 Keyword::While => {
-                    return Ok(Box::new(self.parse_while_statement(location)?));
+                    return Ok(Box::new((&self.parse_while_statement(location)?).into()));
                 }
                 _ => {}
             }
@@ -437,10 +457,12 @@ where
         self.reader.seek_back();
         let expr = self.parse_expression(OperatorType::Semicolon)?;
 
-        Ok(Box::new(ExpressionStatementNode { expression: expr }))
+        Ok(Box::new(
+            (&ExpressionStatementNode { expression: expr }).into(),
+        ))
     }
 
-    fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode<'ctx, 'st>> {
+    fn parse_if_statement(&mut self, location: Location) -> CompilerResult<IfNode> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
         let scope_name = get_random_identifier("if_body");
         let scope = self.parse_scope(&scope_name)?;
@@ -473,10 +495,7 @@ where
         })
     }
 
-    fn parse_while_statement(
-        &mut self,
-        location: Location,
-    ) -> CompilerResult<WhileNode<'ctx, 'st>> {
+    fn parse_while_statement(&mut self, location: Location) -> CompilerResult<WhileNode> {
         let expr = self.parse_expression(OperatorType::LeftBrace)?;
         let scope_name = get_random_identifier("while_body");
         let scope = self.parse_scope(&scope_name)?;
@@ -487,14 +506,16 @@ where
         })
     }
 
-    fn parse_expression(
-        &mut self,
-        stop_op: OperatorType,
-    ) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
+    fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<ExpressionBox> {
         self.parse_expression_until_one_of(&[stop_op])
     }
 
-    fn parse_member_expression(&mut self, location: Location, builder: &mut ExpressionBuilder<'ctx, 'st>, object_expr: ExpressionBox<'ctx, 'st>) -> CompilerResult<()> {
+    fn parse_member_expression(
+        &mut self,
+        location: Location,
+        builder: &mut ExpressionBuilder,
+        object_expr: ExpressionBox,
+    ) -> CompilerResult<()> {
         self.reader.next()?;
         let (field_loc, field_name) = self.reader.expect_identifier_with_loc()?;
         if self
@@ -502,18 +523,24 @@ where
             .skip_token_if_present(TokenType::Operator(OperatorType::LeftParen))?
         {
             let func_call = self.parse_function_call(field_loc, &field_name)?;
-            builder.push_expr(MethodCall {
-                location,
-                object_expr,
-                name: field_name,
-                args: func_call.args,
-            });
+            builder.push_expr(
+                (&MethodCall {
+                    location,
+                    object_expr,
+                    name: field_name,
+                    args: func_call.args,
+                })
+                    .into(),
+            );
         } else {
-            builder.push_expr(GetFieldNode {
-                location,
-                object_expr,
-                field_name,
-            });
+            builder.push_expr(
+                (&GetFieldNode {
+                    location,
+                    object_expr,
+                    field_name,
+                })
+                    .into(),
+            );
         }
 
         Ok(())
@@ -522,7 +549,7 @@ where
     fn parse_expression_until_one_of(
         &mut self,
         stop_ops: &[OperatorType],
-    ) -> CompilerResult<Box<dyn ExpressionNode<'ctx, 'st> + 'ctx>> {
+    ) -> CompilerResult<ExpressionBox> {
         let peek = self.reader.peek();
         let token_start_loc = match peek {
             Ok(tkn) => tkn.location,
@@ -545,57 +572,89 @@ where
                     }
                 }
                 TokenType::Number(num) => {
-                    builder.push_expr(NumberNode {
-                        location: token.location,
-                        number: *num,
-                    });
+                    builder.push_expr(
+                        (&NumberNode {
+                            location: token.location,
+                            number: *num,
+                        })
+                            .into(),
+                    );
                 }
                 TokenType::Identifier(value) => {
                     let peeked = self.reader.peek()?.clone();
                     if peeked.token_type == TokenType::Operator(OperatorType::LeftParen) {
                         self.reader.next()?;
                         let call = self.parse_function_call(peeked.location, value.as_ref())?;
-                        builder.push_expr(call);
+                        builder.push_expr((&call).into());
                     } else if peeked.token_type == TokenType::Operator(OperatorType::LeftSquare) {
                         self.reader.next()?;
                         let expr = self.parse_expression(OperatorType::RightSquare)?;
-                        builder.push_expr(GetElementNode {
-                            location: token.location,
-                            object: Box::new(IdentifierNode {
+                        builder.push_expr(
+                            (&GetElementNode {
+                                location: token.location,
+                                object: Box::new(
+                                    (&IdentifierNode {
+                                        location: token.location,
+                                        name: value.to_string(),
+                                    })
+                                        .into(),
+                                ),
+                                index: expr,
+                            })
+                                .into(),
+                        );
+                    } else if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
+                        self.parse_member_expression(
+                            token.location.clone(),
+                            &mut builder,
+                            Box::new(
+                                (&IdentifierNode {
+                                    location: token.location,
+                                    name: value.to_string(),
+                                })
+                                    .into(),
+                            ),
+                        )?;
+                    } else {
+                        builder.push_expr(
+                            (&IdentifierNode {
                                 location: token.location,
                                 name: value.to_string(),
-                            }),
-                            index: expr,
-                        });
-                    } else if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
-                        self.parse_member_expression(token.location.clone(), &mut builder, Box::new(IdentifierNode {
-                            location: token.location,
-                            name: value.to_string(),
-                        }))?;
-                    } else {
-                        builder.push_expr(IdentifierNode {
-                            location: token.location,
-                            name: value.to_string(),
-                        });
+                            })
+                                .into(),
+                        );
                     }
                 }
                 TokenType::Keyword(kw) => match kw {
                     Keyword::SelfKw => {
                         let peeked = self.reader.peek()?.clone();
                         if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
-                            self.parse_member_expression(token.location.clone(), &mut builder, Box::new(SelfNode {
-                                location: token.location,
-                            }))?;
+                            self.parse_member_expression(
+                                token.location.clone(),
+                                &mut builder,
+                                Box::new(
+                                    (&SelfNode {
+                                        location: token.location,
+                                    })
+                                        .into(),
+                                ),
+                            )?;
                         } else {
-                            builder.push_expr(SelfNode {
-                                location: token.location,
-                            });
+                            builder.push_expr(
+                                (&SelfNode {
+                                    location: token.location,
+                                })
+                                    .into(),
+                            );
                         }
                     }
                     Keyword::Null => {
-                        builder.push_expr(NullNode {
-                            location: token.location,
-                        });
+                        builder.push_expr(
+                            (&NullNode {
+                                location: token.location,
+                            })
+                                .into(),
+                        );
                     }
                     _ => {
                         let cast_type = wrap_option(
@@ -606,30 +665,36 @@ where
                         self.reader
                             .expect_token(TokenType::Operator(OperatorType::LeftParen))?;
                         let expr = self.parse_expression(OperatorType::RightParen)?;
-                        builder.push_expr(CastNode {
-                            location: token.location,
-                            target_type: cast_type,
-                            expr,
-                        });
+                        builder.push_expr(
+                            (&CastNode {
+                                location: token.location,
+                                target_type: cast_type,
+                                expr,
+                            })
+                                .into(),
+                        );
                     }
                 },
                 TokenType::String(str) => {
-                    builder.push_expr(StringNode {
-                        location: token.location,
-                        value: str.to_string(),
-                    });
+                    builder.push_expr(
+                        (&StringNode {
+                            location: token.location,
+                            value: str.to_string(),
+                        })
+                            .into(),
+                    );
                 }
             }
         }
 
-        return builder.build();
+        builder.build()
     }
 
     fn parse_function_call(
         &mut self,
         location: Location,
         name: &str,
-    ) -> CompilerResult<FunctionCall<'ctx, 'st>> {
+    ) -> CompilerResult<FunctionCall> {
         let mut args = Vec::new();
 
         let peek = self.reader.peek()?;
@@ -662,7 +727,7 @@ where
         })
     }
 
-    fn parse_const_decl(&mut self, location: Location) -> CompilerResult<ConstDeclNode<'ctx, 'st>> {
+    fn parse_const_decl(&mut self, location: Location) -> CompilerResult<ConstDeclNode> {
         let name = self.reader.expect_identifier()?;
         let eq_or_colon = self.reader.next()?.clone();
 
@@ -724,7 +789,11 @@ where
 
     fn parse_import(&mut self, location: Location) -> CompilerResult<ImportNode> {
         let module_name = self.reader.expect_identifier()?;
-        self.reader.expect_token(TokenType::Operator(OperatorType::Semicolon))?;
-        Ok(ImportNode{location, module_name})
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::Semicolon))?;
+        Ok(ImportNode {
+            location,
+            module_name,
+        })
     }
 }

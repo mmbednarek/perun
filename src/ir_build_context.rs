@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::address_table::AddressTable;
-use crate::error::{wrap_option, CompilerResult, CompilerResultErrorMapper};
+use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::Location;
 use crate::typing::Type;
@@ -9,8 +9,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
-use inkwell::targets::{FileType, RelocMode, Target, TargetMachine, TargetMachineOptions,
-};
+use inkwell::targets::{FileType, RelocMode, Target, TargetMachine, TargetMachineOptions};
 use inkwell::types::AnyTypeEnum;
 use inkwell::values::{BasicValue, BasicValueEnum, IntValue, PointerValue};
 use inkwell::{IntPredicate, OptimizationLevel};
@@ -136,7 +135,9 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
             self.context,
             var_type,
             value,
-            self.builder.build_load(value, *ptr, name).to_comp_res(location)
+            self.builder
+                .build_load(value, *ptr, name)
+                .to_comp_res(location)
         )
     }
 
@@ -164,7 +165,9 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         name: &str,
     ) -> CompilerResult<PointerValue<'ctx>> {
         visit_type!(location, self.context, ptr_type, value, unsafe {
-            self.builder.build_gep(value, ptr, indicies, name).to_comp_res(location)
+            self.builder
+                .build_gep(value, ptr, indicies, name)
+                .to_comp_res(location)
         })
     }
 
@@ -175,11 +178,10 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         int_value: IntValue<'ctx>,
         name: &str,
     ) -> CompilerResult<IntValue<'ctx>> {
-        match wrap_option(
-            location,
-            target_type.to_llvm_type(self.context),
-            "failed to map llvm type",
-        )? {
+        match target_type
+            .to_llvm_type(self.context)
+            .to_comp_res_with_desc(location, "failed to map llvm type")?
+        {
             AnyTypeEnum::IntType(int_type) => self
                 .builder
                 .build_int_s_extend(int_value, int_type, name)
@@ -198,11 +200,10 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         int_value: IntValue<'ctx>,
         name: &str,
     ) -> CompilerResult<IntValue<'ctx>> {
-        match wrap_option(
-            location,
-            target_type.to_llvm_type(self.context),
-            "failed to map llvm type",
-        )? {
+        match target_type
+            .to_llvm_type(self.context)
+            .to_comp_res_with_desc(location, "failed to map llvm type")?
+        {
             AnyTypeEnum::IntType(int_type) => self
                 .builder
                 .build_int_truncate(int_value, int_type, name)
@@ -220,8 +221,14 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         path: &SymbolPath,
         name: &str,
     ) -> CompilerResult<(&SymbolInfo, &PointerValue<'ctx>)> {
-        let sym = self.symtable.find_symbol(path, name).to_comp_res(location)?;
-        let ptr = self.addrtable.find_symbol(path, name).to_comp_res(location)?;
+        let sym = self
+            .symtable
+            .find_symbol(path, name)
+            .to_comp_res(location)?;
+        let ptr = self
+            .addrtable
+            .find_symbol(path, name)
+            .to_comp_res(location)?;
         Ok((sym, ptr))
     }
 

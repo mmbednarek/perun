@@ -1,8 +1,8 @@
+use crate::error::{SymbolLookupError, SymbolLookupResult};
+use crate::token::Location;
+use crate::typing::Type;
 use std::collections::btree_map::Range;
 use std::collections::BTreeMap;
-use crate::typing::Type;
-use crate::token::Location;
-use crate::error::{SymbolLookupError, SymbolLookupResult};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SymbolType {
@@ -30,7 +30,9 @@ pub struct SymbolPath {
 
 impl SymbolPath {
     pub fn new(module_name: &str) -> Self {
-        Self{path: module_name.to_string()}
+        Self {
+            path: module_name.to_string(),
+        }
     }
 
     pub fn add_sub(&mut self, name: &str) {
@@ -61,7 +63,7 @@ impl SymbolPath {
     pub fn as_range_end(&self) -> Self {
         let mut res_path = self.path.clone();
         res_path.push('/');
-        Self{path: res_path}
+        Self { path: res_path }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -81,10 +83,16 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new() -> Self {
-        Self{symbols: BTreeMap::new()}
+        Self {
+            symbols: BTreeMap::new(),
+        }
     }
 
-    pub fn add_symbol(&mut self, sympath: &SymbolPath, syminfo: SymbolInfo) -> SymbolLookupResult<()> {
+    pub fn add_symbol(
+        &mut self,
+        sympath: &SymbolPath,
+        syminfo: SymbolInfo,
+    ) -> SymbolLookupResult<()> {
         let key = sympath.sub(&syminfo.name);
         if self.symbols.contains_key(&key) {
             return Err(SymbolLookupError::AlreadyRegistered(syminfo.name));
@@ -93,7 +101,11 @@ impl SymbolTable {
         Ok(())
     }
 
-    pub fn find_symbol_path(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<SymbolPath> {
+    pub fn find_symbol_path(
+        &self,
+        lookup_path: &SymbolPath,
+        name: &str,
+    ) -> SymbolLookupResult<SymbolPath> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
@@ -107,7 +119,11 @@ impl SymbolTable {
         Err(SymbolLookupError::NoSymbolFound(name.to_string()))
     }
 
-    pub fn find_symbol(&self, lookup_path: &SymbolPath, name: &str) -> SymbolLookupResult<&SymbolInfo> {
+    pub fn find_symbol(
+        &self,
+        lookup_path: &SymbolPath,
+        name: &str,
+    ) -> SymbolLookupResult<&SymbolInfo> {
         let mut path = lookup_path.clone();
 
         while !path.is_empty() {
@@ -148,7 +164,7 @@ impl SymbolTable {
             Type::Alias(alias) => {
                 let symbol = self.find_symbol(path, &alias)?;
                 Ok(symbol.data_type.clone())
-            },
+            }
             tp => Ok(tp),
         }
     }
