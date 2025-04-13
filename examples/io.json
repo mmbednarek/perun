@@ -1,0 +1,27 @@
+{
+  "name": "io",
+  "functions": [
+    {
+      "name": "print",
+      "return_type": "void",
+      "args": [
+        {
+          "name": "msg",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "print_int",
+      "return_type": "void",
+      "args": [
+        {
+          "name": "in_value",
+          "arg_type": "i32",
+          "is_ref": false
+        }
+      ]
+    }
+  ]
+}

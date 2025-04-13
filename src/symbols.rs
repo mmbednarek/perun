@@ -1,3 +1,4 @@
+use crate::ast::Identifier;
 use crate::error::{SymbolLookupError, SymbolLookupResult};
 use crate::token::Location;
 use crate::typing::Type;
@@ -13,6 +14,7 @@ pub enum SymbolType {
     StructField(usize),
     LocalVariable,
     LocalReference,
+    Namespace,
 }
 
 #[derive(Debug)]
@@ -29,14 +31,21 @@ pub struct SymbolPath {
 }
 
 impl SymbolPath {
+    pub fn empty() -> Self {
+        Self { path: "".into() }
+    }
+
     pub fn new(module_name: &str) -> Self {
+        assert!(!module_name.is_empty());
         Self {
             path: module_name.to_string(),
         }
     }
 
     pub fn add_sub(&mut self, name: &str) {
-        self.path.push('.');
+        if !self.path.is_empty() {
+            self.path.push('.');
+        }
         self.path.push_str(name);
     }
 
@@ -90,14 +99,14 @@ impl SymbolTable {
 
     pub fn add_symbol(
         &mut self,
-        sympath: &SymbolPath,
-        syminfo: SymbolInfo,
+        symbol_path: &SymbolPath,
+        symbol_info: SymbolInfo,
     ) -> SymbolLookupResult<()> {
-        let key = sympath.sub(&syminfo.name);
+        let key = symbol_path.sub(&symbol_info.name);
         if self.symbols.contains_key(&key) {
-            return Err(SymbolLookupError::AlreadyRegistered(syminfo.name));
+            return Err(SymbolLookupError::AlreadyRegistered(symbol_info.name));
         }
-        self.symbols.insert(key, syminfo);
+        self.symbols.insert(key, symbol_info);
         Ok(())
     }
 
@@ -126,10 +135,14 @@ impl SymbolTable {
     ) -> SymbolLookupResult<&SymbolInfo> {
         let mut path = lookup_path.clone();
 
-        while !path.is_empty() {
+        loop {
             let sym = self.symbols.get(&path.sub(name));
             if let Some(symbol) = sym {
                 return Ok(symbol);
+            }
+
+            if path.is_empty() {
+                break;
             }
             path.truncate_to_parent();
         }
@@ -167,5 +180,21 @@ impl SymbolTable {
             }
             tp => Ok(tp),
         }
+    }
+
+    pub fn get_identifier_path(
+        &self,
+        path: &SymbolPath,
+        identifier: &Identifier,
+    ) -> SymbolLookupResult<SymbolPath> {
+        Ok(if let Some(ns) = &identifier.namespace {
+            let namespace_sym = self.find_symbol(path, ns)?;
+            if namespace_sym.sym_type != SymbolType::Namespace {
+                return Err(SymbolLookupError::NotANamespace);
+            }
+            SymbolPath::new(namespace_sym.name.as_ref())
+        } else {
+            path.clone()
+        })
     }
 }

@@ -522,7 +522,13 @@ where
             .reader
             .skip_token_if_present(TokenType::Operator(OperatorType::LeftParen))?
         {
-            let func_call = self.parse_function_call(field_loc, &field_name)?;
+            let func_call = self.parse_function_call(
+                field_loc,
+                Identifier {
+                    namespace: None,
+                    value: field_name.to_string(),
+                },
+            )?;
             builder.push_expr(
                 (&MethodCall {
                     location,
@@ -541,6 +547,76 @@ where
                 })
                     .into(),
             );
+        }
+
+        Ok(())
+    }
+
+    fn parse_identifier_continuation(
+        &mut self,
+        builder: &mut ExpressionBuilder,
+        location: &Location,
+        identifier: Identifier,
+    ) -> CompilerResult<()> {
+        let peeked = self.reader.peek()?.clone();
+        match peeked.token_type {
+            TokenType::Operator(OperatorType::LeftParen) => {
+                self.reader.next()?;
+                let call = self.parse_function_call(peeked.location, identifier)?;
+                builder.push_expr((&call).into());
+            }
+            TokenType::Operator(OperatorType::LeftSquare) => {
+                self.reader.next()?;
+                let expr = self.parse_expression(OperatorType::RightSquare)?;
+                builder.push_expr(
+                    (&GetElementNode {
+                        location: *location,
+                        object: Box::new(
+                            (&IdentifierNode {
+                                location: *location,
+                                name: identifier,
+                            })
+                                .into(),
+                        ),
+                        index: expr,
+                    })
+                        .into(),
+                );
+            }
+            TokenType::Operator(OperatorType::Dot) => {
+                self.parse_member_expression(
+                    location.clone(),
+                    builder,
+                    Box::new(
+                        (&IdentifierNode {
+                            location: *location,
+                            name: identifier,
+                        })
+                            .into(),
+                    ),
+                )?;
+            }
+            TokenType::Operator(OperatorType::DoubleColon) => {
+                self.reader.next()?;
+                let identifier_str = self.reader.expect_identifier()?;
+                self.parse_identifier_continuation(
+                    builder,
+                    location,
+                    Identifier {
+                        namespace: Some(identifier.value),
+                        value: identifier_str,
+                    },
+                )?;
+            }
+            _ => {
+                builder.push_expr(
+                    (&IdentifierNode {
+                        location: *location,
+                        name: identifier,
+                    })
+                        .into(),
+                );
+            }
         }
 
         Ok(())
@@ -581,49 +657,14 @@ where
                     );
                 }
                 TokenType::Identifier(value) => {
-                    let peeked = self.reader.peek()?.clone();
-                    if peeked.token_type == TokenType::Operator(OperatorType::LeftParen) {
-                        self.reader.next()?;
-                        let call = self.parse_function_call(peeked.location, value.as_ref())?;
-                        builder.push_expr((&call).into());
-                    } else if peeked.token_type == TokenType::Operator(OperatorType::LeftSquare) {
-                        self.reader.next()?;
-                        let expr = self.parse_expression(OperatorType::RightSquare)?;
-                        builder.push_expr(
-                            (&GetElementNode {
-                                location: token.location,
-                                object: Box::new(
-                                    (&IdentifierNode {
-                                        location: token.location,
-                                        name: value.to_string(),
-                                    })
-                                        .into(),
-                                ),
-                                index: expr,
-                            })
-                                .into(),
-                        );
-                    } else if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
-                        self.parse_member_expression(
-                            token.location.clone(),
-                            &mut builder,
-                            Box::new(
-                                (&IdentifierNode {
-                                    location: token.location,
-                                    name: value.to_string(),
-                                })
-                                    .into(),
-                            ),
-                        )?;
-                    } else {
-                        builder.push_expr(
-                            (&IdentifierNode {
-                                location: token.location,
-                                name: value.to_string(),
-                            })
-                                .into(),
-                        );
-                    }
+                    self.parse_identifier_continuation(
+                        &mut builder,
+                        &token.location,
+                        Identifier {
+                            namespace: None,
+                            value: value.clone(),
+                        },
+                    )?;
                 }
                 TokenType::Keyword(kw) => match kw {
                     Keyword::SelfKw => {
@@ -693,7 +734,7 @@ where
     fn parse_function_call(
         &mut self,
         location: Location,
-        name: &str,
+        name: Identifier,
     ) -> CompilerResult<FunctionCall> {
         let mut args = Vec::new();
 
@@ -702,7 +743,7 @@ where
             self.reader.next()?;
             return Ok(FunctionCall {
                 location,
-                name: name.to_string(),
+                name,
                 args,
             });
         }
@@ -722,7 +763,7 @@ where
 
         Ok(FunctionCall {
             location,
-            name: name.to_string(),
+            name,
             args,
         })
     }

@@ -55,6 +55,8 @@ impl Type {
     pub fn from_string(s: &str) -> Type {
         match s {
             "void" => Type::Void,
+            "i8" => Type::Int8,
+            "i16" => Type::Int16,
             "i32" => Type::Int32,
             "f32" => Type::Float32,
             "bool" => Type::Bool,

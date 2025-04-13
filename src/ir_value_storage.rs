@@ -62,10 +62,14 @@ impl<'ctx> IRValueStorage<'ctx> {
     pub fn find_func(&self, lookup_path: &SymbolPath, name: &str) -> Option<&FunctionValue<'ctx>> {
         let mut path = lookup_path.clone();
 
-        while !path.is_empty() {
+        loop {
             let func = self.functions.get(&path.sub(name));
             if func.is_some() {
                 return func;
+            }
+
+            if path.is_empty() {
+                break;
             }
             path.truncate_to_parent();
         }

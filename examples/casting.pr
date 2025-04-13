@@ -1,4 +1,3 @@
-extern fn write(fd: i32, buff: rawptr, count: i64): i64;
 extern fn malloc(size: i64): rawptr;
 extern fn free(ptr: rawptr);
 extern fn fsync(fd: i32): i32;
@@ -16,7 +15,7 @@ fn int_log10(in_value: i32) : i32 {
   return count;
 }
 
-fn cast_int_to_string(in_value: i32) : rawptr {
+fn int_to_string(in_value: i32) : rawptr {
   var x = in_value;
 
   var length = int_log10(in_value);
@@ -39,15 +38,4 @@ fn cast_int_to_string(in_value: i32) : rawptr {
   }
 
   return buff;
-}
-
-fn print(msg: rawptr) {
-  write(1, msg, strlen(msg));
-  fsync(1);
-}
-
-fn print_int(in_value: i32) {
-  var str = cast_int_to_string(in_value);
-  print(str);
-  free(str);
 }

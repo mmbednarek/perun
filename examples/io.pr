@@ -1,0 +1,17 @@
+import casting;
+
+extern fn write(fd: i32, buff: rawptr, count: i64): i64;
+extern fn free(ptr: rawptr);
+extern fn fsync(fd: i32): i32;
+extern fn strlen(str: rawptr): i64;
+
+fn print(msg: rawptr) {
+  write(1, msg, strlen(msg));
+  fsync(1);
+}
+
+fn print_int(in_value: i32) {
+  var str = casting::int_to_string(in_value);
+  print(str);
+  free(str);
+}

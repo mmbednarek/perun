@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
-use crate::module_api;
+use crate::module::Module;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
 use crate::type_deduction_pass::deduce_type;
 use crate::typing::{FuncType, FuncTypeArg, StructType, Type};
@@ -134,31 +134,32 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
         Ok(())
     }
 
-    fn visit_import(&mut self, node: &ImportNode, path: &SymbolPath) -> CompilerResult<()> {
-        let module = module_api::load_module(&format!("{}.json", node.module_name))
+    fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
+        let module = Module::new(&format!("{}.json", node.module_name))
             .to_comp_res_with_desc(node.location, "unable to load module")?;
 
-        for func in module.functions {
-            let mut args: Vec<FuncTypeArg<Type>> = Vec::new();
-            for arg in &func.args {
-                args.push(FuncTypeArg {
-                    is_ref: arg.is_ref,
-                    arg_type: Type::from_string(&arg.arg_type),
-                });
-            }
+        let module_path = SymbolPath::new(node.module_name.as_ref());
 
-            let ret_type = self
-                .symbol_table
-                .resolve_type_alias(path, Type::from_string(&func.return_type))
-                .to_comp_res(node.location)?;
+        self.symbol_table
+            .add_symbol(
+                &SymbolPath::empty(),
+                SymbolInfo {
+                    name: node.module_name.clone(),
+                    sym_type: SymbolType::Namespace,
+                    data_type: Type::Void,
+                    location: node.location,
+                },
+            )
+            .to_comp_res(node.location)?;
 
+        for (name, func) in &module.functions {
             self.symbol_table
                 .add_symbol(
-                    path,
+                    &module_path,
                     SymbolInfo {
-                        name: func.name.to_string(),
+                        name: name.clone(),
                         sym_type: SymbolType::FunctionDef,
-                        data_type: Type::Function(Box::new(FuncType { args, ret_type })),
+                        data_type: Type::Function(Box::new(func.clone())),
                         location: node.location,
                     },
                 )

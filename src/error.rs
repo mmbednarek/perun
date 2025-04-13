@@ -23,6 +23,7 @@ pub trait CompilerResultErrorMapperWithDesc {
 pub enum SymbolLookupError {
     AlreadyRegistered(String),
     NoSymbolFound(String),
+    NotANamespace,
 }
 
 impl SymbolLookupError {
@@ -32,6 +33,7 @@ impl SymbolLookupError {
                 format!("symbol {} is already registered in this scope", sym_name)
             }
             Self::NoSymbolFound(sym_name) => format!("symbol not found: {}", sym_name),
+            Self::NotANamespace => "symbol is not a namespace".into(),
         }
     }
 }

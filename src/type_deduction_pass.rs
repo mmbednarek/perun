@@ -85,9 +85,13 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
     type VisitResult = CompilerResult<Type>;
 
     fn visit_identifier(&self, node: &IdentifierNode, pd: &Payload) -> CompilerResult<Type> {
+        let path = self
+            .symbol_table
+            .get_identifier_path(&pd.path, &node.name)
+            .to_comp_res(node.location)?;
         let symbol = self
             .symbol_table
-            .find_symbol(&pd.path, &node.name)
+            .find_symbol(&path, &node.name.value)
             .to_comp_res(node.location)?;
         Ok(symbol.data_type.clone())
     }
@@ -143,9 +147,14 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
     }
 
     fn visit_function_call(&self, node: &FunctionCall, pd: &Payload) -> CompilerResult<Type> {
+        let path = self
+            .symbol_table
+            .get_identifier_path(&pd.path, &node.name)
+            .to_comp_res(node.location)?;
+
         let symbol = self
             .symbol_table
-            .find_symbol(&pd.path, &node.name)
+            .find_symbol(&path, &node.name.value)
             .to_comp_res(node.location)?;
         if let Type::Function(fn_type) = &symbol.data_type {
             return Ok(fn_type.ret_type.clone());

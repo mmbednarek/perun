@@ -32,6 +32,7 @@ mod ir_value_storage;
 mod collect_symbols_pass;
 mod compile_time_evaluation_pass;
 mod ir_translation_pass;
+mod module;
 mod module_api;
 mod type_deduction_pass;
 
@@ -128,7 +129,8 @@ fn main() -> std::io::Result<()> {
 
         let mut generator = IRBuildContext::new(&il_context, &sym_table);
 
-        let mut translation_pass = ir_translation_pass::IRTranslationPass::new(&mut generator);
+        let mut translation_pass =
+            ir_translation_pass::IRTranslationPass::new(&mut generator, basename.into());
 
         let generate_res = translation_pass.visit_global_statement(&(&parsed).into(), &path);
         if let Err(err) = &generate_res {

@@ -17,6 +17,7 @@ pub enum OperatorType {
     Dot,
     Comma,
     Colon,
+    DoubleColon,
     Semicolon,
     Equals,
     Asterisk,
@@ -71,6 +72,7 @@ impl OperatorType {
             OperatorType::Not => true,
             OperatorType::Ampersand => true,
             OperatorType::Or => true,
+            OperatorType::Colon => true,
             _ => false,
         }
     }
@@ -99,6 +101,10 @@ impl OperatorType {
             },
             OperatorType::Or => match other {
                 OperatorType::Or => Some(OperatorType::LogicalOr),
+                _ => None,
+            },
+            OperatorType::Colon => match other {
+                OperatorType::Colon => Some(OperatorType::DoubleColon),
                 _ => None,
             },
             _ => None,

@@ -3,8 +3,8 @@ use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::{Location, OperatorType};
 use crate::typing::{Type, ValueType};
 
-fn create_method_name(receiver: &str, name: &str) -> String {
-    format!("perun.method.{}.{}", receiver, name)
+fn create_method_name(module: &str, receiver: &str, name: &str) -> String {
+    format!("perun.method.{}.{}.{}", module, receiver, name)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -141,6 +141,12 @@ pub trait LocatedNode {
     fn get_location(&self) -> &Location;
 }
 
+#[derive(Debug, Clone)]
+pub struct Identifier {
+    pub namespace: Option<String>,
+    pub value: String,
+}
+
 pub type GlobalStatementBox = Box<AnyGlobalStatement>;
 pub type StatementBox = Box<AnyStatementNode>;
 pub type ExpressionBox = Box<AnyExpressionNode>;
@@ -188,7 +194,7 @@ pub struct FunctionArg {
     pub is_ref: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FunctionLinkage {
     Standard,
     External,
@@ -217,14 +223,18 @@ impl<'ctx, 'st> FunctionNode {
         }
     }
 
-    pub fn effective_name(&self) -> CompilerResult<String> {
+    pub fn effective_name(&self, module_name: &str) -> CompilerResult<String> {
         if let Some(self_type) = &self.self_type {
             match self_type {
-                Type::Alias(alias) => Ok(create_method_name(alias, &self.name)),
+                Type::Alias(alias) => Ok(create_method_name(module_name, alias, &self.name)),
                 _ => compiler_err!(self.location, "invalid type"),
             }
         } else {
-            Ok(self.name.clone())
+            if self.linkage == FunctionLinkage::External {
+                Ok(self.name.clone())
+            } else {
+                Ok(format!("{}.{}", module_name, self.name))
+            }
         }
     }
 }
@@ -506,7 +516,7 @@ pub trait StatementVisitor {
 #[derive(Debug, Clone)]
 pub struct IdentifierNode {
     pub location: Location,
-    pub name: String,
+    pub name: Identifier,
 }
 
 impl LocatedNode for IdentifierNode {
@@ -642,7 +652,7 @@ impl Into<AnyExpressionNode> for &SingularExpressionNode {
 #[derive(Debug, Clone)]
 pub struct FunctionCall {
     pub location: Location,
-    pub name: String,
+    pub name: Identifier,
     pub args: Vec<ExpressionBox>,
 }
 

@@ -1,4 +1,4 @@
-import corelib;
+import io;
 
 struct Foo {
     lorem: i32,
@@ -18,7 +18,11 @@ fn Foo.reset_values(ref self) {
     self.set_values(0, 0);
 }
 
-fn main() : i32 {
+fn value_type() : i32 {
+    return 12343;
+}
+
+extern fn main() : i32 {
     var foo: Foo;
     foo.lorem = 10;
     foo.ipsum = 20;
@@ -27,7 +31,7 @@ fn main() : i32 {
 
     foo.reset_values();
 
-    print("hello!\n");
+    io::print("hello!\n");
 
     return foo.add_attribs();
 }

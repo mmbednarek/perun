@@ -1,0 +1,164 @@
+{
+  "name": "sdl",
+  "functions": [
+    {
+      "name": "init",
+      "return_type": "i32",
+      "args": [
+        {
+          "name": "flags",
+          "arg_type": "i32",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "create_window",
+      "return_type": "rawptr",
+      "args": [
+        {
+          "name": "title",
+          "arg_type": "rawptr",
+          "is_ref": false
+        },
+        {
+          "name": "x",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "y",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "w",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "h",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "flags",
+          "arg_type": "i32",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "poll_event",
+      "return_type": "i32",
+      "args": [
+        {
+          "name": "event",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "create_renderer",
+      "return_type": "rawptr",
+      "args": [
+        {
+          "name": "wnd",
+          "arg_type": "rawptr",
+          "is_ref": false
+        },
+        {
+          "name": "idk",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "flags",
+          "arg_type": "i32",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "render_clear",
+      "return_type": "i32",
+      "args": [
+        {
+          "name": "renderer",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "render_present",
+      "return_type": "void",
+      "args": [
+        {
+          "name": "renderer",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "delay",
+      "return_type": "void",
+      "args": [
+        {
+          "name": "ms",
+          "arg_type": "i32",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "set_render_draw_color",
+      "return_type": "i32",
+      "args": [
+        {
+          "name": "renderer",
+          "arg_type": "rawptr",
+          "is_ref": false
+        },
+        {
+          "name": "r",
+          "arg_type": "i8",
+          "is_ref": false
+        },
+        {
+          "name": "g",
+          "arg_type": "i8",
+          "is_ref": false
+        },
+        {
+          "name": "b",
+          "arg_type": "i8",
+          "is_ref": false
+        },
+        {
+          "name": "a",
+          "arg_type": "i8",
+          "is_ref": false
+        }
+      ]
+    },
+    {
+      "name": "render_fill_rect",
+      "return_type": "i32",
+      "args": [
+        {
+          "name": "renderer",
+          "arg_type": "rawptr",
+          "is_ref": false
+        },
+        {
+          "name": "rect",
+          "arg_type": "rawptr",
+          "is_ref": false
+        }
+      ]
+    }
+  ]
+}

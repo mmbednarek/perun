@@ -3,15 +3,8 @@ extern fn rand(): i32;
 extern fn malloc(size: i64): rawptr;
 
 // SDL functions and constants
-extern fn SDL_Init(flags: i32): i32;
-extern fn SDL_CreateWindow(title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32): rawptr;
-extern fn SDL_PollEvent(event: rawptr): i32;
-extern fn SDL_CreateRenderer(wnd: rawptr, idk: i32, flags: i32): rawptr;
-extern fn SDL_RenderClear(renderer: rawptr): i32;
-extern fn SDL_RenderPresent(renderer: rawptr);
-extern fn SDL_Delay(ms: i32);
-extern fn SDL_SetRenderDrawColor(renderer: rawptr, r: i8, g: i8, b: i8, a: i8): i32;
-extern fn SDL_RenderFillRect(renderer: rawptr, rect: rawptr): i32;
+import sdl;
+import io;
 
 const SDL_INIT_EVERYTHING = 62001;
 const SDL_WINDOWPOS_CENTERED = 805240832;
@@ -42,11 +35,6 @@ const KEY_D = 7;
 const EVENT_QUIT = 256;
 const EVENT_KEYDOWN = 768;
 
-// Perun corelib functions
-fn print(msg: rawptr);
-fn print_int(in_value: i32);
-
-
 struct SnakeSegment {
     x: i32,
     y: i32,
@@ -59,13 +47,13 @@ const WINDOW_HEIGHT = 600;
 const CELL_WIDTH = 32;
 const CELL_HEIGHT = 32;
 
-fn main() : i32 {
-    if SDL_Init(SDL_INIT_EVERYTHING) != 0 {
-        print("failed to initialize SDL\n");
+extern fn main() : i32 {
+    if sdl::init(SDL_INIT_EVERYTHING) != 0 {
+        io::print("failed to initialize SDL\n");
         return 1;
     }
 
-    var wnd_handle = SDL_CreateWindow(
+    var wnd_handle = sdl::create_window(
         "Snake Game",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
@@ -76,7 +64,7 @@ fn main() : i32 {
 
     var event_ptr = malloc(56);
     var is_running: bool = 1;
-    var renderer_handle = SDL_CreateRenderer(wnd_handle, -1, 2);
+    var renderer_handle = sdl::create_renderer(wnd_handle, -1, 2);
     var rect: Rect;
     var snake = malloc(256*16);
     var head: i32 = 2;
@@ -101,7 +89,7 @@ fn main() : i32 {
     rect.h = CELL_HEIGHT;
 
     while is_running {
-        while SDL_PollEvent(event_ptr) {
+        while sdl::poll_event(event_ptr) {
             ref event_type: i32 = *event_ptr;
 
             if event_type == EVENT_QUIT {
@@ -177,11 +165,11 @@ fn main() : i32 {
             target_y = rand() % (WINDOW_HEIGHT-32);
             speed = speed + 1;
 
-            print("new apple position: ");
-            print_int(target_x);
-            print(", ");
-            print_int(target_y);
-            print("\n");
+            io::print("new apple position: ");
+            io::print_int(target_x);
+            io::print(", ");
+            io::print_int(target_y);
+            io::print("\n");
 
             if head < 255 {
                 head = head + 1;
@@ -193,28 +181,28 @@ fn main() : i32 {
             }
         }
 
-        SDL_RenderClear(renderer_handle);
+        sdl::render_clear(renderer_handle);
 
-        SDL_SetRenderDrawColor(renderer_handle, 255, 0, 0, 255);
+        sdl::set_render_draw_color(renderer_handle, 255, 0, 0, 255);
 
         index = 0;
         while index <= head {
             ref seg: SnakeSegment = snake[index];
             rect.x = seg.x;
             rect.y = seg.y;
-            SDL_RenderFillRect(renderer_handle, &rect);
+            sdl::render_fill_rect(renderer_handle, &rect);
             index = index + 1;
         }
 
-        SDL_SetRenderDrawColor(renderer_handle, 0, 255, 0, 255);
+        sdl::set_render_draw_color(renderer_handle, 0, 255, 0, 255);
         rect.x = target_x;
         rect.y = target_y;
-        SDL_RenderFillRect(renderer_handle, &rect);
+        sdl::render_fill_rect(renderer_handle, &rect);
 
-        SDL_SetRenderDrawColor(renderer_handle, 0, 0, 0, 255);
+        sdl::set_render_draw_color(renderer_handle, 0, 0, 0, 255);
 
-        SDL_RenderPresent(renderer_handle);
-        SDL_Delay(15);
+        sdl::render_present(renderer_handle);
+        sdl::delay(15);
     }
 
     return 0;

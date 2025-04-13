@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
-use crate::module_api;
+use crate::module::Module;
 use crate::symbols::{SymbolPath, SymbolType};
 use crate::token::Location;
 use crate::type_deduction_pass::{deduce_type, TypeDeductionPass};
@@ -148,11 +148,15 @@ impl<'ctx> AnyTypeEnumUtil<'ctx> for AnyTypeEnum<'ctx> {
 
 pub struct IRTranslationPass<'irb, 'ctx, 'st> {
     ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
+    module_name: String,
 }
 
 impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
-    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>) -> Self {
-        Self { ir_builder }
+    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>, module_name: String) -> Self {
+        Self {
+            ir_builder,
+            module_name,
+        }
     }
 
     pub fn load_value(
@@ -170,7 +174,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                 path,
                 &data_type,
                 ptr,
-                node.name.as_ref(),
+                node.name.value.as_ref(),
             )?)),
             ValueType::None => Ok(self.ir_builder.null_ptr()),
         }
@@ -624,10 +628,11 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
 
         let sub_path = node.sub_path(path)?;
 
-        let function =
-            self.ir_builder
-                .module
-                .add_function(&node.effective_name()?, fn_type, linkage);
+        let function = self.ir_builder.module.add_function(
+            &node.effective_name(self.module_name.as_ref())?,
+            fn_type,
+            linkage,
+        );
         self.ir_builder
             .ir_value_storage
             .register_func(sub_path.clone(), function);
@@ -722,11 +727,13 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         }
     }
 
-    fn visit_import(&mut self, node: &ImportNode, path: &SymbolPath) -> CompilerResult<()> {
-        let module = module_api::load_module(&format!("{}.json", node.module_name))
+    fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
+        let module = Module::new(&format!("{}.json", node.module_name))
             .to_comp_res_with_desc(node.location, "unable to load module")?;
 
-        for func in module.functions {
+        let module_path = SymbolPath::new(node.module_name.as_ref());
+
+        for (name, func) in &module.functions {
             let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
             for arg in &func.args {
                 if arg.is_ref {
@@ -738,14 +745,10 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
                     );
                 } else {
                     args.push(
-                        self.translate_type(
-                            &node.location,
-                            path,
-                            &Type::from_string(&arg.arg_type),
-                        )?
-                        .to_basic_type()
-                        .to_comp_res_with_desc(node.location, "invalid type")?
-                        .into(),
+                        self.translate_type(&node.location, &module_path, &arg.arg_type)?
+                            .to_basic_type()
+                            .to_comp_res_with_desc(node.location, "invalid type")?
+                            .into(),
                     );
                 }
             }
@@ -753,7 +756,7 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             let ret_type = self
                 .ir_builder
                 .symbol_table
-                .resolve_type_alias(path, Type::from_string(&func.return_type))
+                .resolve_type_alias(&module_path, func.ret_type.clone())
                 .to_comp_res(node.location)?;
 
             let fn_type = visit_any_type!(
@@ -764,13 +767,15 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
                 Ok(value.fn_type(&args[..], false))
             )?;
 
+            let func_name = format!("{}.{}", node.module_name, name);
+
             let function =
                 self.ir_builder
                     .module
-                    .add_function(&func.name, fn_type, Some(Linkage::External));
+                    .add_function(&func_name, fn_type, Some(Linkage::External));
             self.ir_builder
                 .ir_value_storage
-                .register_func(path.sub(&func.name), function);
+                .register_func(module_path.sub(&name), function);
         }
         Ok(())
     }
@@ -1045,10 +1050,16 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &IdentifierNode,
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
+        let path = self
+            .ir_builder
+            .symbol_table
+            .get_identifier_path(&pd.path, &node.name)
+            .to_comp_res(node.location)?;
+
         let symbol = self
             .ir_builder
             .symbol_table
-            .find_symbol(&pd.path, &node.name)
+            .find_symbol(&path, &node.name.value)
             .to_comp_res(node.location)?;
         match symbol.sym_type {
             SymbolType::FunctionArg(index, is_ref) => {
@@ -1062,10 +1073,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                         ValueType::LValue => Ok(Box::new(arg_ptr)),
                         ValueType::RValue => Ok(Box::new(self.load_variable(
                             &node.location,
-                            &pd.path,
+                            &path,
                             &symbol.data_type,
                             &arg_ptr,
-                            node.name.as_ref(),
+                            node.name.value.as_ref(),
                         )?)),
                         ValueType::None => Ok(self.ir_builder.null_ptr()),
                     }
@@ -1076,37 +1087,37 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             SymbolType::LocalVariable => {
                 let (sym, ptr) = self.ir_builder.find_symbol_with_addr(
                     node.location,
-                    &pd.path,
-                    node.name.as_ref(),
+                    &path,
+                    node.name.value.as_ref(),
                 )?;
                 let data_type = self
                     .ir_builder
                     .symbol_table
-                    .resolve_type_alias(&pd.path, sym.data_type.clone())
+                    .resolve_type_alias(&path, sym.data_type.clone())
                     .to_comp_res(node.location)?;
-                self.load_value(node, &pd.path, &data_type, &pd.value_type, ptr)
+                self.load_value(node, &path, &data_type, &pd.value_type, ptr)
             }
             SymbolType::LocalReference => {
                 let (sym, ptr) = self.ir_builder.find_symbol_with_addr(
                     node.location,
-                    &pd.path,
-                    node.name.as_ref(),
+                    &path,
+                    node.name.value.as_ref(),
                 )?;
                 let loaded_ptr_var = self.load_variable(
                     &node.location,
-                    &pd.path,
+                    &path,
                     &Type::RawPtr,
                     ptr,
-                    node.name.as_ref(),
+                    node.name.value.as_ref(),
                 )?;
                 let loaded_ptr = loaded_ptr_var.to_ptr(node.location)?;
-                self.load_value(node, &pd.path, &sym.data_type, &pd.value_type, &loaded_ptr)
+                self.load_value(node, &path, &sym.data_type, &pd.value_type, &loaded_ptr)
             }
             SymbolType::ConstantDef => {
                 let basic_val = self
                     .ir_builder
                     .ir_value_storage
-                    .find_basic_value(&pd.path, &node.name)
+                    .find_basic_value(&path, &node.name.value)
                     .to_comp_res_with_desc(node.location, "unable to find value")?;
                 Ok(Box::new(basic_val.as_basic_value_enum()))
             }
@@ -1475,11 +1486,16 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         assert_ne!(pd.value_type, ValueType::LValue);
+        let path = self
+            .ir_builder
+            .symbol_table
+            .get_identifier_path(&pd.path, &node.name)
+            .to_comp_res(node.location)?;
 
         let symbol = self
             .ir_builder
             .symbol_table
-            .find_symbol(&pd.path, &node.name)
+            .find_symbol(&path, &node.name.value)
             .to_comp_res(node.location)?;
         if let Type::Function(fn_type) = &symbol.data_type {
             assert_eq!(fn_type.args.len(), node.args.len());
@@ -1497,12 +1513,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             let func = self
                 .ir_builder
                 .ir_value_storage
-                .find_func(&pd.path, &node.name)
+                .find_func(&path, &node.name.value)
                 .to_comp_res_with_desc(node.location, "no function found.")?;
             let call_res = self
                 .ir_builder
                 .builder
-                .build_call(*func, call_args.as_ref(), node.name.as_ref())
+                .build_call(*func, call_args.as_ref(), node.name.value.as_ref())
                 .to_comp_res(node.location)?;
             let res = call_res.try_as_basic_value();
 
