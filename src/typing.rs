@@ -1,6 +1,7 @@
 use crate::token::Keyword;
 use inkwell::context::Context;
 use inkwell::types::{AnyType, AnyTypeEnum, BasicTypeEnum};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identifier {
@@ -183,6 +184,27 @@ impl Type {
         } else {
             self.clone()
         }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str: String = match self {
+            Type::Void => "void",
+            Type::RawPtr => "rawptr",
+            Type::Int8 => "i8",
+            Type::Int16 => "i16",
+            Type::Int32 => "i32",
+            Type::Int64 => "i64",
+            Type::Float32 => "f32",
+            Type::Float64 => "f64",
+            Type::Bool => "bool",
+            Type::Struct(_) => "struct",
+            Type::Alias(v) => &v.value,
+            Type::Function(_) => "function",
+        }
+        .into();
+        write!(f, "{}", str)
     }
 }
 

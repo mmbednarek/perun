@@ -1,10 +1,10 @@
 use crate::ast::*;
+use crate::ast_passes::type_deduction_pass::{deduce_type, TypeDeductionPass};
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::module::Module;
 use crate::symbols::{SymbolPath, SymbolType};
 use crate::token::Location;
-use crate::type_deduction_pass::{deduce_type, TypeDeductionPass};
 use crate::typing::{FuncTypeBox, Type, ValueType};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
@@ -148,11 +148,15 @@ impl<'ctx> AnyTypeEnumUtil<'ctx> for AnyTypeEnum<'ctx> {
 
 pub struct IRTranslationPass<'irb, 'ctx, 'st> {
     ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
+    import_directory: String,
 }
 
 impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
-    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>) -> Self {
-        Self { ir_builder }
+    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>, import_directory: String) -> Self {
+        Self {
+            ir_builder,
+            import_directory,
+        }
     }
 
     pub fn load_value(
@@ -257,14 +261,16 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         expected_type: Type,
         node: &AnyExpressionNode,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        crate::compile_time_evaluation_pass::CompileTimeEvaluationPass::new(self.ir_builder)
-            .visit_expression(
-                node,
-                &crate::compile_time_evaluation_pass::Payload {
-                    path,
-                    expected_type,
-                },
-            )
+        crate::ast_passes::compile_time_evaluation_pass::CompileTimeEvaluationPass::new(
+            self.ir_builder,
+        )
+        .visit_expression(
+            node,
+            &crate::ast_passes::compile_time_evaluation_pass::Payload {
+                path,
+                expected_type,
+            },
+        )
     }
 
     fn build_cast(
@@ -728,8 +734,15 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
-        let module = Module::new(&format!("{}.json", node.module_name), node.location)
-            .to_comp_res_with_desc(node.location, "unable to load module")?;
+        let module = Module::new(
+            &format!(
+                "{}/{}.json",
+                self.import_directory.as_str(),
+                node.module_name
+            ),
+            node.location,
+        )
+        .to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = SymbolPath::new(node.module_name.as_ref());
 
@@ -1317,7 +1330,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         let (operand_type, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
             .deduce_operand_and_out_type_for_binary_expression(
                 node,
-                &crate::type_deduction_pass::Payload {
+                &crate::ast_passes::type_deduction_pass::Payload {
                     path: pd.path.clone(),
                     expected_type: pd.expected_type.clone(),
                 },

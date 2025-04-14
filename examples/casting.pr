@@ -15,7 +15,7 @@ fn int_log10(in_value: i32) : i32 {
   return count;
 }
 
-fn int_to_string(in_value: i32) : rawptr {
+pub fn int_to_string(in_value: i32) : rawptr {
   var x = in_value;
 
   var length = int_log10(in_value);

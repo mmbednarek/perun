@@ -1,6 +1,6 @@
 use crate::ast::{
-    ConstDeclNode, ExpressionBox, FunctionArg, FunctionLinkage, FunctionNode, StructField,
-    StructNode,
+    AnyExpressionNode, ConstDeclNode, ExpressionBox, FunctionArg, FunctionLinkage, FunctionNode,
+    StructField, StructNode,
 };
 use crate::lexer::Lexer;
 use crate::module_api::{load_module, ModuleCore};
@@ -10,9 +10,18 @@ use crate::token_reader::TokenReader;
 use crate::typing::Type;
 
 pub struct Module {
+    pub name: String,
     pub functions: Vec<FunctionNode>,
     pub constants: Vec<ConstDeclNode>,
     pub structs: Vec<StructNode>,
+}
+
+fn expression_to_string(expr: &AnyExpressionNode) -> String {
+    match expr {
+        AnyExpressionNode::Number(num) => num.number.to_string(),
+        AnyExpressionNode::String(str) => str.value.clone(),
+        _ => "0".into(),
+    }
 }
 
 fn parse_immediate_value(value: &str) -> Option<ExpressionBox> {
@@ -34,6 +43,7 @@ impl Module {
     }
     pub fn from_api(module_core: &ModuleCore, location: Location) -> Option<Self> {
         let mut module = Self {
+            name: module_core.name.clone(),
             functions: Vec::new(),
             constants: Vec::new(),
             structs: Vec::new(),
@@ -48,6 +58,7 @@ impl Module {
                     constant.const_type.as_ref(),
                 )),
                 value: parse_immediate_value(constant.value.as_str())?,
+                is_public: true,
             });
         }
 
@@ -83,6 +94,7 @@ impl Module {
                 ),
                 linkage: FunctionLinkage::Standard,
                 scope: None,
+                is_public: true,
             });
         }
 
@@ -103,9 +115,66 @@ impl Module {
                 location,
                 name: struct_value.name.clone(),
                 fields,
+                is_public: true,
             });
         }
 
         Some(module)
+    }
+
+    pub fn to_api(&self) -> ModuleCore {
+        let mut module = ModuleCore {
+            name: self.name.clone(),
+            functions: vec![],
+            constants: vec![],
+            structs: vec![],
+        };
+
+        for func in &self.functions {
+            let mut arguments = Vec::<crate::module_api::FunctionArg>::new();
+            for arg in &func.params {
+                arguments.push(crate::module_api::FunctionArg {
+                    name: arg.name.clone(),
+                    is_ref: arg.is_ref,
+                    arg_type: arg.arg_type.to_string(),
+                });
+            }
+
+            module.functions.push(crate::module_api::Function {
+                name: func.name.clone(),
+                receiver: func.self_type.clone().map(|t| t.to_string()),
+                return_type: func.ret_type.to_string(),
+                args: arguments,
+            })
+        }
+
+        for constant in &self.constants {
+            module.constants.push(crate::module_api::Constant {
+                name: constant.name.clone(),
+                const_type: constant
+                    .const_type
+                    .clone()
+                    .unwrap_or(Type::Int32)
+                    .to_string(),
+                value: expression_to_string(&constant.value),
+            })
+        }
+
+        for structure in &self.structs {
+            let mut struct_fields = Vec::<crate::module_api::StructArg>::new();
+            for field in &structure.fields {
+                struct_fields.push(crate::module_api::StructArg {
+                    name: field.name.clone(),
+                    arg_type: field.field_type.to_string(),
+                });
+            }
+
+            module.structs.push(crate::module_api::Struct {
+                name: structure.name.clone(),
+                arguments: struct_fields,
+            });
+        }
+
+        module
     }
 }

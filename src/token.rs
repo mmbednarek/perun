@@ -136,6 +136,7 @@ pub enum Keyword {
     Else,
     SelfKw,
     Import,
+    Public,
 }
 
 impl Keyword {
@@ -163,6 +164,7 @@ impl Keyword {
             "else" => Some(Keyword::Else),
             "self" => Some(Keyword::SelfKw),
             "import" => Some(Keyword::Import),
+            "pub" => Some(Keyword::Public),
             _ => None,
         }
     }

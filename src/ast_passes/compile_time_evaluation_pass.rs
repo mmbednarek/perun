@@ -1,9 +1,9 @@
 use crate::ast::*;
+use crate::ast_passes::ir_translation_pass::BasicValueBox;
+use crate::ast_passes::type_deduction_pass::deduce_type;
 use crate::error::{CompilerResult, CompilerResultErrorMapperWithDesc};
 use crate::ir_build_context::IRBuildContext;
-use crate::ir_translation_pass::BasicValueBox;
 use crate::symbols::SymbolPath;
-use crate::type_deduction_pass::deduce_type;
 use crate::typing::Type;
 use inkwell::types::AnyTypeEnum;
 

@@ -5,12 +5,12 @@ extern fn free(ptr: rawptr);
 extern fn fsync(fd: i32): i32;
 extern fn strlen(str: rawptr): i64;
 
-fn print(msg: rawptr) {
+pub fn print(msg: rawptr) {
   write(1, msg, strlen(msg));
   fsync(1);
 }
 
-fn print_int(in_value: i32) {
+pub fn print_int(in_value: i32) {
   var str = casting::int_to_string(in_value);
   print(str);
   free(str);

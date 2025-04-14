@@ -1,10 +1,10 @@
 extern fn malloc(size: i64): rawptr;
 extern fn free(handle: rawptr);
 
-fn allocate(size: i64) : rawptr {
+pub fn allocate(size: i64) : rawptr {
     return malloc(size);
 }
 
-fn release(handle: rawptr) {
+pub fn release(handle: rawptr) {
     free(handle);
 }

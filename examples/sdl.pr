@@ -8,17 +8,17 @@ extern fn SDL_Delay(ms: i32);
 extern fn SDL_SetRenderDrawColor(renderer: rawptr, r: i8, g: i8, b: i8, a: i8): i32;
 extern fn SDL_RenderFillRect(renderer: rawptr, rect: rawptr): i32;
 
-const SDL_INIT_EVERYTHING = 62001;
-const SDL_WINDOWPOS_CENTERED = 805240832;
+pub const INIT_EVERYTHING = 62001;
+pub const WINDOWPOS_CENTERED = 805240832;
 
-struct Rect {
+pub struct Rect {
     x: i32,
     y: i32,
     w: i32,
     h: i32,
 }
 
-struct KeyboardEvent {
+pub struct KeyboardEvent {
     event_type: i32,
     timestamp: i32,
     windowID: i32,
@@ -29,54 +29,54 @@ struct KeyboardEvent {
     keysym: i32,
 }
 
-const KEY_W = 26;
-const KEY_S = 22;
-const KEY_A = 4;
-const KEY_D = 7;
+pub const KEY_W = 26;
+pub const KEY_S = 22;
+pub const KEY_A = 4;
+pub const KEY_D = 7;
 
-const EVENT_QUIT = 256;
-const EVENT_KEYDOWN = 768;
+pub const EVENT_QUIT = 256;
+pub const EVENT_KEYDOWN = 768;
 
-fn init(flags: i32) : i32 {
+pub fn init(flags: i32) : i32 {
     return SDL_Init(flags);
 }
 
-struct Window {
+pub struct Window {
     handle: rawptr,
 }
 
-fn Window.init(ref self, title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32) {
+pub fn Window.init(ref self, title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32) {
     self.handle = SDL_CreateWindow(title, x, y, w, h, flags);
 }
 
-fn poll_event(event: rawptr) : i32 {
+pub fn poll_event(event: rawptr) : i32 {
     return SDL_PollEvent(event);
 }
 
-struct Renderer {
+pub struct Renderer {
     handle: rawptr,
 }
 
-fn Renderer.init(ref self, ref wnd: Window, idk: i32, flags: i32) {
+pub fn Renderer.init(ref self, ref wnd: Window, idk: i32, flags: i32) {
     self.handle = SDL_CreateRenderer(wnd.handle, idk, flags);
 }
 
-fn Renderer.clear(ref self) : i32 {
+pub fn Renderer.clear(ref self) : i32 {
     return SDL_RenderClear(self.handle);
 }
 
-fn Renderer.present(ref self) {
+pub fn Renderer.present(ref self) {
     SDL_RenderPresent(self.handle);
 }
 
-fn Renderer.set_draw_color(ref self, r: i8, g: i8, b: i8, a: i8) : i32 {
+pub fn Renderer.set_draw_color(ref self, r: i8, g: i8, b: i8, a: i8) : i32 {
     return SDL_SetRenderDrawColor(self.handle, r, g, b, a);
 }
 
-fn Renderer.fill_rect(ref self, rect: rawptr) : i32 {
+pub fn Renderer.fill_rect(ref self, rect: rawptr) : i32 {
     return SDL_RenderFillRect(self.handle, rect);
 }
 
-fn delay(ms: i32) {
+pub fn delay(ms: i32) {
     SDL_Delay(ms);
 }

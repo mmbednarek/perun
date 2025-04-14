@@ -152,6 +152,7 @@ where
     pub fn parse(&mut self) -> CompilerResult<SourceUnit> {
         let mut result = SourceUnit { body: Vec::new() };
 
+        let mut is_public = false;
         while self.reader.has_tokens() {
             let token = self.reader.next()?;
             let location = token.location;
@@ -159,7 +160,12 @@ where
                 match kw {
                     Keyword::Fn => {
                         let func: GlobalStatementBox = Box::new(
-                            (&self.parse_function(location, FunctionLinkage::Standard)?).into(),
+                            (&self.parse_function(
+                                location,
+                                FunctionLinkage::Standard,
+                                is_public,
+                            )?)
+                                .into(),
                         );
                         result.body.push(func);
                     }
@@ -167,18 +173,23 @@ where
                         self.reader.expect_token(TokenType::Keyword(Keyword::Fn))?;
 
                         let extern_func: GlobalStatementBox = Box::new(
-                            (&self.parse_function(location, FunctionLinkage::External)?).into(),
+                            (&self.parse_function(
+                                location,
+                                FunctionLinkage::External,
+                                is_public,
+                            )?)
+                                .into(),
                         );
                         result.body.push(extern_func);
                     }
                     Keyword::Const => {
                         let const_expr: GlobalStatementBox =
-                            Box::new((&self.parse_const_decl(location)?).into());
+                            Box::new((&self.parse_const_decl(location, is_public)?).into());
                         result.body.push(const_expr);
                     }
                     Keyword::Struct => {
                         let struct_node: GlobalStatementBox =
-                            Box::new((&self.parse_struct(location)?).into());
+                            Box::new((&self.parse_struct(location, is_public)?).into());
                         result.body.push(struct_node);
                     }
                     Keyword::Import => {
@@ -186,8 +197,13 @@ where
                             Box::new((&self.parse_import(location)?).into());
                         result.body.push(import_node);
                     }
+                    Keyword::Public => {
+                        is_public = true;
+                        continue;
+                    }
                     _ => compiler_err!(location, "unexpected token: {:?}", kw),
                 }
+                is_public = false;
             }
         }
 
@@ -198,6 +214,7 @@ where
         &mut self,
         location: Location,
         suggested_linkage: FunctionLinkage,
+        is_public: bool,
     ) -> CompilerResult<FunctionNode> {
         let paren_or_dot = self.reader.find_one_of(&[
             TokenType::Operator(OperatorType::LeftParen),
@@ -324,6 +341,7 @@ where
             ret_type,
             linkage,
             scope,
+            is_public,
         })
     }
 
@@ -795,7 +813,11 @@ where
         })
     }
 
-    fn parse_const_decl(&mut self, location: Location) -> CompilerResult<ConstDeclNode> {
+    fn parse_const_decl(
+        &mut self,
+        location: Location,
+        is_public: bool,
+    ) -> CompilerResult<ConstDeclNode> {
         let name = self.reader.expect_identifier()?;
         let eq_or_colon = self.reader.next()?.clone();
 
@@ -817,10 +839,11 @@ where
             name,
             const_type,
             value,
+            is_public,
         })
     }
 
-    fn parse_struct(&mut self, location: Location) -> CompilerResult<StructNode> {
+    fn parse_struct(&mut self, location: Location, is_public: bool) -> CompilerResult<StructNode> {
         let name = self.reader.expect_identifier()?;
         self.reader
             .expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
@@ -852,6 +875,7 @@ where
             location,
             name,
             fields,
+            is_public,
         })
     }
 

@@ -162,6 +162,7 @@ pub struct ConstDeclNode {
     pub name: String,
     pub const_type: Option<Type>,
     pub value: ExpressionBox,
+    pub is_public: bool,
 }
 
 impl LocatedNode for ConstDeclNode {
@@ -200,6 +201,7 @@ pub struct FunctionNode {
     pub ret_type: Type,
     pub linkage: FunctionLinkage,
     pub scope: Option<ScopeNode>,
+    pub is_public: bool,
 }
 
 impl<'ctx, 'st> FunctionNode {
@@ -261,6 +263,7 @@ pub struct StructNode {
     pub location: Location,
     pub name: String,
     pub fields: Vec<StructField>,
+    pub is_public: bool,
 }
 
 impl LocatedNode for StructNode {

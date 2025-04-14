@@ -1,17 +1,21 @@
 use crate::ast::*;
+use crate::ast_passes::type_deduction_pass::deduce_type;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::module::Module;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
-use crate::type_deduction_pass::deduce_type;
 use crate::typing::{FuncType, FuncTypeArg, StructType, Type};
 
 pub struct CollectSymbolsPass<'st> {
     symbol_table: &'st mut SymbolTable,
+    import_directory: String,
 }
 
 impl<'st> CollectSymbolsPass<'st> {
-    pub fn new(symbol_table: &'st mut SymbolTable) -> Self {
-        CollectSymbolsPass { symbol_table }
+    pub fn new(symbol_table: &'st mut SymbolTable, import_directory: String) -> Self {
+        CollectSymbolsPass {
+            symbol_table,
+            import_directory,
+        }
     }
 
     fn visit_scope(&mut self, node: &ScopeNode, path: &SymbolPath) -> CompilerResult<()> {
@@ -135,8 +139,15 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
-        let module = Module::new(&format!("{}.json", node.module_name), node.location)
-            .to_comp_res_with_desc(node.location, "unable to load module")?;
+        let module = Module::new(
+            &format!(
+                "{}/{}.json",
+                self.import_directory.as_str(),
+                node.module_name
+            ),
+            node.location,
+        )
+        .to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = SymbolPath::new(node.module_name.as_ref());
 
