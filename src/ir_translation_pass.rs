@@ -148,15 +148,11 @@ impl<'ctx> AnyTypeEnumUtil<'ctx> for AnyTypeEnum<'ctx> {
 
 pub struct IRTranslationPass<'irb, 'ctx, 'st> {
     ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
-    module_name: String,
 }
 
 impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
-    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>, module_name: String) -> Self {
-        Self {
-            ir_builder,
-            module_name,
-        }
+    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>) -> Self {
+        Self { ir_builder }
     }
 
     pub fn load_value(
@@ -480,10 +476,15 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         src_type: &Type,
     ) -> CompilerResult<AnyTypeEnum<'ctx>> {
         if let Type::Alias(aliased_type) = src_type {
+            let alias_path = self
+                .ir_builder
+                .symbol_table
+                .get_identifier_path(path, aliased_type)
+                .to_comp_res(*location)?;
             let resolved_type = self
                 .ir_builder
                 .ir_value_storage
-                .find_global_type(path, aliased_type.as_ref());
+                .find_global_type(&alias_path, aliased_type.value.as_ref());
             if let Some(res_type) = resolved_type {
                 return Ok(res_type);
             }
@@ -622,17 +623,16 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         )?;
 
         let linkage = match node.linkage {
-            FunctionLinkage::Standard => None,
+            FunctionLinkage::Standard | FunctionLinkage::Entrypoint => None,
             FunctionLinkage::External => Some(Linkage::External),
         };
 
-        let sub_path = node.sub_path(path)?;
+        let sub_path = node.sub_path(node.location, self.ir_builder.symbol_table, path)?;
 
-        let function = self.ir_builder.module.add_function(
-            &node.effective_name(self.module_name.as_ref())?,
-            fn_type,
-            linkage,
-        );
+        let function =
+            self.ir_builder
+                .module
+                .add_function(&node.effective_name(&sub_path), fn_type, linkage);
         self.ir_builder
             .ir_value_storage
             .register_func(sub_path.clone(), function);
@@ -700,7 +700,7 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             .to_comp_res_with_desc(node.location, "failed to find struct symbol")?;
 
         if let Type::Struct(struct_type) = &symbol.data_type {
-            let struct_name = format!("perun.struct.{}", node.name);
+            let struct_name = format!("perun.struct.{}", struct_path.to_string());
             let ir_type = self
                 .ir_builder
                 .context
@@ -728,55 +728,21 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
-        let module = Module::new(&format!("{}.json", node.module_name))
+        let module = Module::new(&format!("{}.json", node.module_name), node.location)
             .to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = SymbolPath::new(node.module_name.as_ref());
 
-        for (name, func) in &module.functions {
-            let mut args: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-            for arg in &func.args {
-                if arg.is_ref {
-                    args.push(
-                        self.ir_builder
-                            .context
-                            .ptr_type(AddressSpace::from(0))
-                            .into(),
-                    );
-                } else {
-                    args.push(
-                        self.translate_type(&node.location, &module_path, &arg.arg_type)?
-                            .to_basic_type()
-                            .to_comp_res_with_desc(node.location, "invalid type")?
-                            .into(),
-                    );
-                }
-            }
-
-            let ret_type = self
-                .ir_builder
-                .symbol_table
-                .resolve_type_alias(&module_path, func.ret_type.clone())
-                .to_comp_res(node.location)?;
-
-            let fn_type = visit_any_type!(
-                node.location,
-                self.ir_builder.context,
-                &ret_type,
-                value,
-                Ok(value.fn_type(&args[..], false))
-            )?;
-
-            let func_name = format!("{}.{}", node.module_name, name);
-
-            let function =
-                self.ir_builder
-                    .module
-                    .add_function(&func_name, fn_type, Some(Linkage::External));
-            self.ir_builder
-                .ir_value_storage
-                .register_func(module_path.sub(&name), function);
+        for struct_node in &module.structs {
+            self.visit_struct(struct_node, &module_path)?;
         }
+        for constant_node in &module.constants {
+            self.visit_const_decl(constant_node, &module_path)?;
+        }
+        for func_node in &module.functions {
+            self.visit_function(func_node, &module_path)?;
+        }
+
         Ok(())
     }
 }
@@ -1607,7 +1573,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             },
         )?;
 
-        let sym = node.get_symbol(self.ir_builder.symbol_table, &pd.path, &obj_type)?;
+        let sym = node.get_symbol(
+            node.location,
+            self.ir_builder.symbol_table,
+            &pd.path,
+            &obj_type,
+        )?;
 
         if let SymbolType::StructField(id) = sym.sym_type {
             match obj.as_ref().as_basic_value_enum() {

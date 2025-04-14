@@ -26,8 +26,14 @@ $(BUILD_DIR)/io.o: $(BUILD_DIR) io.pr
 $(BUILD_DIR)/sdl.o: $(BUILD_DIR) sdl.pr
 	$(PERUNC) sdl.pr -o $(BUILD_DIR)/sdl.o
 
-$(BUILD_DIR)/snake: $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o
-	gcc $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o -lSDL2 -o $(BUILD_DIR)/snake
+$(BUILD_DIR)/mem.o: $(BUILD_DIR) mem.pr
+	$(PERUNC) mem.pr -o $(BUILD_DIR)/mem.o
+
+$(BUILD_DIR)/random.o: $(BUILD_DIR) random.pr
+	$(PERUNC) random.pr -o $(BUILD_DIR)/random.o
+
+$(BUILD_DIR)/snake: $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o $(BUILD_DIR)/random.o $(BUILD_DIR)/mem.o
+	gcc $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o $(BUILD_DIR)/random.o $(BUILD_DIR)/mem.o -lSDL2 -o $(BUILD_DIR)/snake
 
 $(BUILD_DIR)/linked_list: $(BUILD_DIR)/linked_list.o $(BUILD_DIR)/corelib.o
 	gcc $(BUILD_DIR)/linked_list.o $(BUILD_DIR)/corelib.o -o $(BUILD_DIR)/linked_list

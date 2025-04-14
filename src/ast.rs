@@ -1,11 +1,7 @@
 use crate::error::{CompilerResult, CompilerResultErrorMapper};
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::{Location, OperatorType};
-use crate::typing::{Type, ValueType};
-
-fn create_method_name(module: &str, receiver: &str, name: &str) -> String {
-    format!("perun.method.{}.{}.{}", module, receiver, name)
-}
+use crate::typing::{Identifier, Type, ValueType};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOperation {
@@ -141,12 +137,6 @@ pub trait LocatedNode {
     fn get_location(&self) -> &Location;
 }
 
-#[derive(Debug, Clone)]
-pub struct Identifier {
-    pub namespace: Option<String>,
-    pub value: String,
-}
-
 pub type GlobalStatementBox = Box<AnyGlobalStatement>;
 pub type StatementBox = Box<AnyStatementNode>;
 pub type ExpressionBox = Box<AnyExpressionNode>;
@@ -198,6 +188,7 @@ pub struct FunctionArg {
 pub enum FunctionLinkage {
     Standard,
     External,
+    Entrypoint,
 }
 
 #[derive(Debug, Clone)]
@@ -212,29 +203,36 @@ pub struct FunctionNode {
 }
 
 impl<'ctx, 'st> FunctionNode {
-    pub fn sub_path(&self, path: &SymbolPath) -> CompilerResult<SymbolPath> {
+    pub fn sub_path(
+        &self,
+        location: Location,
+        symbol_table: &SymbolTable,
+        path: &SymbolPath,
+    ) -> CompilerResult<SymbolPath> {
         if let Some(self_type) = &self.self_type {
             match self_type {
-                Type::Alias(alias) => Ok(path.sub(alias).sub(&self.name)),
+                Type::Alias(alias) => {
+                    let path = symbol_table
+                        .get_identifier_path(path, alias)
+                        .to_comp_res(location)?;
+                    Ok(path.sub(&alias.value).sub(&self.name))
+                }
                 _ => compiler_err!(self.location, "invalid type"),
             }
         } else {
-            Ok(path.sub(&self.name))
+            match self.linkage {
+                FunctionLinkage::Standard | FunctionLinkage::Entrypoint => Ok(path.sub(&self.name)),
+                FunctionLinkage::External => Ok(SymbolPath::empty().sub(&self.name)),
+            }
         }
     }
 
-    pub fn effective_name(&self, module_name: &str) -> CompilerResult<String> {
-        if let Some(self_type) = &self.self_type {
-            match self_type {
-                Type::Alias(alias) => Ok(create_method_name(module_name, alias, &self.name)),
-                _ => compiler_err!(self.location, "invalid type"),
-            }
-        } else {
-            if self.linkage == FunctionLinkage::External {
-                Ok(self.name.clone())
-            } else {
-                Ok(format!("{}.{}", module_name, self.name))
-            }
+    pub fn effective_name(&self, path: &SymbolPath) -> String {
+        assert!(!path.is_empty());
+        match self.linkage {
+            FunctionLinkage::Standard => format!("perun.fn.{}", path.to_string()),
+            FunctionLinkage::External => path.to_string(),
+            FunctionLinkage::Entrypoint => "main".to_string(),
         }
     }
 }
@@ -716,16 +714,20 @@ pub struct GetFieldNode {
 impl GetFieldNode {
     pub fn get_symbol<'st>(
         &self,
+        location: Location,
         symbol_table: &'st SymbolTable,
         path: &SymbolPath,
         obj_type: &Type,
     ) -> CompilerResult<&'st SymbolInfo> {
         if let Type::Alias(alias) = &obj_type {
             let alias_path = symbol_table
-                .find_symbol_path(path, alias)
-                .to_comp_res(self.location)?;
+                .get_identifier_path(path, alias)
+                .to_comp_res(location)?;
+            let sym_path = symbol_table
+                .find_symbol_path(&alias_path, &alias.value)
+                .to_comp_res(location)?;
             let symbol = symbol_table
-                .find_symbol(&alias_path, &self.field_name)
+                .find_symbol(&sym_path, &self.field_name)
                 .to_comp_res(self.location)?;
             Ok(symbol)
         } else {
@@ -763,7 +765,7 @@ impl MethodCall {
     ) -> CompilerResult<SymbolPath> {
         if let Type::Alias(alias) = obj_type {
             let receiver_path = symtable
-                .find_symbol_path(path, alias)
+                .find_identifier_path(path, alias)
                 .to_comp_res(self.location)?;
             Ok(receiver_path.sub(&self.name))
         } else {

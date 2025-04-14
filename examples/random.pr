@@ -1,0 +1,11 @@
+// Clib functions
+extern fn rand(): i32;
+extern fn srand(seed: i32);
+
+fn get_value(min: i32, max: i32) : i32 {
+    return rand() % (max - min) + min;
+}
+
+fn set_seed(value: i32) {
+    srand(value);
+}

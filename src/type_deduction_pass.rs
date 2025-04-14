@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
-use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
+use crate::symbols::{SymbolPath, SymbolTable};
 use crate::typing::Type;
 
 pub struct TypeDeductionPass<'st> {
@@ -41,27 +41,6 @@ impl<'st> TypeDeductionPass<'st> {
         }
     }
 
-    fn get_symbol_for_get_field_node(
-        &self,
-        node: &GetFieldNode,
-        pd: &Payload,
-    ) -> CompilerResult<&'st SymbolInfo> {
-        let obj_type = self.visit_expression(node.object_expr.as_ref(), pd)?;
-        if let Type::Alias(alias) = &obj_type {
-            let alias_path = self
-                .symbol_table
-                .find_symbol_path(&pd.path, alias)
-                .to_comp_res(node.location)?;
-            let symbol = self
-                .symbol_table
-                .find_symbol(&alias_path, &node.field_name)
-                .to_comp_res(node.location)?;
-            Ok(symbol)
-        } else {
-            compiler_err!(node.location, "invalid object type");
-        }
-    }
-
     fn get_path_for_method_call(
         &self,
         node: &MethodCall,
@@ -71,7 +50,7 @@ impl<'st> TypeDeductionPass<'st> {
         if let Type::Alias(alias) = &obj_type {
             let receiver_path = self
                 .symbol_table
-                .find_symbol_path(&pd.path, alias)
+                .find_identifier_path(&pd.path, alias)
                 .to_comp_res(node.location)?;
             Ok(receiver_path.sub(&node.name))
         } else {
@@ -171,7 +150,8 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
     }
 
     fn visit_get_field(&self, node: &GetFieldNode, pd: &Payload) -> CompilerResult<Type> {
-        let sym = self.get_symbol_for_get_field_node(node, pd)?;
+        let obj_type = self.visit_expression(node.object_expr.as_ref(), pd)?;
+        let sym = node.get_symbol(node.location, self.symbol_table, &pd.path, &obj_type)?;
         Ok(sym.data_type.clone())
     }
 

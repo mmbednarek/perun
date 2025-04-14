@@ -129,8 +129,7 @@ fn main() -> std::io::Result<()> {
 
         let mut generator = IRBuildContext::new(&il_context, &sym_table);
 
-        let mut translation_pass =
-            ir_translation_pass::IRTranslationPass::new(&mut generator, basename.into());
+        let mut translation_pass = ir_translation_pass::IRTranslationPass::new(&mut generator);
 
         let generate_res = translation_pass.visit_global_statement(&(&parsed).into(), &path);
         if let Err(err) = &generate_res {

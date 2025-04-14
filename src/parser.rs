@@ -1,10 +1,11 @@
 use rand::{distributions::Alphanumeric, Rng};
 
+use crate::ast::FunctionLinkage::Standard;
 use crate::ast::*;
 use crate::error::{wrap_option, CompilerResult};
 use crate::token::{Keyword, Location, OperatorType, TokenType};
 use crate::token_reader::TokenReader;
-use crate::typing::Type;
+use crate::typing::{Identifier, Type};
 use std::mem::take;
 
 fn get_random_identifier(prefix: &str) -> String {
@@ -196,7 +197,7 @@ where
     fn parse_function(
         &mut self,
         location: Location,
-        linkage: FunctionLinkage,
+        suggested_linkage: FunctionLinkage,
     ) -> CompilerResult<FunctionNode> {
         let paren_or_dot = self.reader.find_one_of(&[
             TokenType::Operator(OperatorType::LeftParen),
@@ -212,6 +213,13 @@ where
         }
 
         let name = self.reader.expect_identifier()?;
+
+        let linkage = if suggested_linkage == Standard && name == "main" {
+            FunctionLinkage::Entrypoint
+        } else {
+            suggested_linkage
+        };
+
         self.reader
             .expect_token(TokenType::Operator(OperatorType::LeftParen))?;
 
@@ -320,7 +328,7 @@ where
     }
 
     fn parse_type(&mut self) -> CompilerResult<Type> {
-        let token = self.reader.next()?;
+        let token = self.reader.next()?.clone();
         match &token.token_type {
             TokenType::Keyword(kw) => {
                 let arg_type_res = Type::from_keyword(kw);
@@ -329,7 +337,26 @@ where
                     None => compiler_err!(token.location, "invalid type {:?}", kw),
                 }
             }
-            TokenType::Identifier(iden) => Ok(Type::Alias(iden.clone())),
+            TokenType::Identifier(identifier) => {
+                let double_colon_token = self.reader.peek()?.clone();
+                Ok(Type::Alias(
+                    if double_colon_token.token_type
+                        == TokenType::Operator(OperatorType::DoubleColon)
+                    {
+                        self.reader.next()?;
+                        let value = self.reader.expect_identifier()?;
+                        Identifier {
+                            namespace: Some(identifier.clone()),
+                            value,
+                        }
+                    } else {
+                        Identifier {
+                            namespace: None,
+                            value: identifier.clone(),
+                        }
+                    },
+                ))
+            }
             _ => {
                 compiler_err!(token.location, "invalid token {:?}", token.token_type)
             }
@@ -506,7 +533,7 @@ where
         })
     }
 
-    fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<ExpressionBox> {
+    pub fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<ExpressionBox> {
         self.parse_expression_until_one_of(&[stop_op])
     }
 

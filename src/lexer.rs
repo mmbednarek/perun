@@ -22,8 +22,8 @@ enum LexState {
     ReadOperator,
 }
 
-pub struct Lexer {
-    reader: Box<dyn Read>,
+pub struct Lexer<'src> {
+    reader: Box<dyn Read + 'src>,
     out_tokens: Vec<Token>,
     current_token: String,
     state: LexState,
@@ -32,8 +32,8 @@ pub struct Lexer {
     current_location: Location,
 }
 
-impl Lexer {
-    pub fn new(reader: Box<dyn Read>) -> Lexer {
+impl<'src> Lexer<'src> {
+    pub fn new(reader: Box<dyn Read + 'src>) -> Lexer<'src> {
         Lexer {
             reader,
             out_tokens: Vec::new(),

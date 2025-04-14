@@ -1,7 +1,6 @@
-use crate::ast::Identifier;
 use crate::error::{SymbolLookupError, SymbolLookupResult};
 use crate::token::Location;
-use crate::typing::Type;
+use crate::typing::{Identifier, Type};
 use std::collections::btree_map::Range;
 use std::collections::BTreeMap;
 
@@ -128,6 +127,15 @@ impl SymbolTable {
         Err(SymbolLookupError::NoSymbolFound(name.to_string()))
     }
 
+    pub fn find_identifier_path(
+        &self,
+        lookup_path: &SymbolPath,
+        identifier: &Identifier,
+    ) -> SymbolLookupResult<SymbolPath> {
+        let identifier_path = self.get_identifier_path(lookup_path, identifier)?;
+        self.find_symbol_path(&identifier_path, &identifier.value)
+    }
+
     pub fn find_symbol(
         &self,
         lookup_path: &SymbolPath,
@@ -175,7 +183,7 @@ impl SymbolTable {
     pub fn resolve_type_alias(&self, path: &SymbolPath, in_type: Type) -> SymbolLookupResult<Type> {
         match in_type {
             Type::Alias(alias) => {
-                let symbol = self.find_symbol(path, &alias)?;
+                let symbol = self.find_identifier(path, &alias)?;
                 Ok(symbol.data_type.clone())
             }
             tp => Ok(tp),
@@ -196,5 +204,14 @@ impl SymbolTable {
         } else {
             path.clone()
         })
+    }
+
+    pub fn find_identifier(
+        &self,
+        path: &SymbolPath,
+        identifier: &Identifier,
+    ) -> SymbolLookupResult<&SymbolInfo> {
+        let alias_path = self.get_identifier_path(path, identifier)?;
+        Ok(self.find_symbol(&alias_path, &identifier.value)?)
     }
 }

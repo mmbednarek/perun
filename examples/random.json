@@ -1,23 +1,28 @@
 {
-  "name": "io",
+  "name": "random",
   "functions": [
     {
-      "name": "print",
-      "return_type": "void",
+      "name": "get_value",
+      "return_type": "i32",
       "args": [
         {
-          "name": "msg",
-          "arg_type": "rawptr",
+          "name": "min",
+          "arg_type": "i32",
+          "is_ref": false
+        },
+        {
+          "name": "max",
+          "arg_type": "i32",
           "is_ref": false
         }
       ]
     },
     {
-      "name": "print_int",
+      "name": "set_seed",
       "return_type": "void",
       "args": [
         {
-          "name": "in_value",
+          "name": "value",
           "arg_type": "i32",
           "is_ref": false
         }

@@ -41,34 +41,42 @@ fn init(flags: i32) : i32 {
     return SDL_Init(flags);
 }
 
-fn create_window(title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32) : rawptr {
-    return SDL_CreateWindow(title, x, y, w, h, flags);
+struct Window {
+    handle: rawptr,
+}
+
+fn Window.init(ref self, title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32) {
+    self.handle = SDL_CreateWindow(title, x, y, w, h, flags);
 }
 
 fn poll_event(event: rawptr) : i32 {
     return SDL_PollEvent(event);
 }
 
-fn create_renderer(wnd: rawptr, idk: i32, flags: i32) : rawptr {
-    return SDL_CreateRenderer(wnd, idk, flags);
+struct Renderer {
+    handle: rawptr,
 }
 
-fn render_clear(renderer: rawptr) : i32 {
-    return SDL_RenderClear(renderer);
+fn Renderer.init(ref self, ref wnd: Window, idk: i32, flags: i32) {
+    self.handle = SDL_CreateRenderer(wnd.handle, idk, flags);
 }
 
-fn render_present(renderer: rawptr) {
-    SDL_RenderPresent(renderer);
+fn Renderer.clear(ref self) : i32 {
+    return SDL_RenderClear(self.handle);
+}
+
+fn Renderer.present(ref self) {
+    SDL_RenderPresent(self.handle);
+}
+
+fn Renderer.set_draw_color(ref self, r: i8, g: i8, b: i8, a: i8) : i32 {
+    return SDL_SetRenderDrawColor(self.handle, r, g, b, a);
+}
+
+fn Renderer.fill_rect(ref self, rect: rawptr) : i32 {
+    return SDL_RenderFillRect(self.handle, rect);
 }
 
 fn delay(ms: i32) {
     SDL_Delay(ms);
-}
-
-fn set_render_draw_color(renderer: rawptr, r: i8, g: i8, b: i8, a: i8) : i32 {
-    return SDL_SetRenderDrawColor(renderer, r, g, b, a);
-}
-
-fn render_fill_rect(renderer: rawptr, rect: rawptr) : i32 {
-    return SDL_RenderFillRect(renderer, rect);
 }

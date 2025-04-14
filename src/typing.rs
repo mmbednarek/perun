@@ -3,6 +3,12 @@ use inkwell::context::Context;
 use inkwell::types::{AnyType, AnyTypeEnum, BasicTypeEnum};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identifier {
+    pub namespace: Option<String>,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncTypeArg<T> {
     pub is_ref: bool,
     pub arg_type: T,
@@ -35,7 +41,7 @@ pub enum Type {
     Float64,
     Bool,
     Struct(StructTypeBox<Type>),
-    Alias(String),
+    Alias(Identifier),
     Function(FuncTypeBox<Type>),
 }
 
@@ -52,16 +58,20 @@ fn struct_to_llvm_type<'ctx>(
 }
 
 impl Type {
-    pub fn from_string(s: &str) -> Type {
+    pub fn from_string(namespace: Option<String>, s: &str) -> Type {
         match s {
             "void" => Type::Void,
             "i8" => Type::Int8,
             "i16" => Type::Int16,
             "i32" => Type::Int32,
+            "i64" => Type::Int64,
             "f32" => Type::Float32,
             "bool" => Type::Bool,
             "rawptr" => Type::RawPtr,
-            _ => Type::Alias(s.into()),
+            _ => Type::Alias(Identifier {
+                namespace,
+                value: s.into(),
+            }),
         }
     }
 

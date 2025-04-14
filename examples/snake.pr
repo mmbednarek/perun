@@ -1,39 +1,7 @@
-// Clib functions
-extern fn rand(): i32;
-extern fn malloc(size: i64): rawptr;
-
-// SDL functions and constants
-import sdl;
 import io;
-
-const SDL_INIT_EVERYTHING = 62001;
-const SDL_WINDOWPOS_CENTERED = 805240832;
-
-struct Rect {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-
-struct KeyboardEvent {
-    event_type: i32,
-    timestamp: i32,
-    windowID: i32,
-    state: i8,
-    repeat: i8,
-    padding2: i8,
-    padding3: i8,
-    keysym: i32,
-}
-
-const KEY_W = 26;
-const KEY_S = 22;
-const KEY_A = 4;
-const KEY_D = 7;
-
-const EVENT_QUIT = 256;
-const EVENT_KEYDOWN = 768;
+import mem;
+import random;
+import sdl;
 
 struct SnakeSegment {
     x: i32,
@@ -47,30 +15,34 @@ const WINDOW_HEIGHT = 600;
 const CELL_WIDTH = 32;
 const CELL_HEIGHT = 32;
 
-extern fn main() : i32 {
-    if sdl::init(SDL_INIT_EVERYTHING) != 0 {
+fn main() : i32 {
+    if sdl::init(sdl::INIT_EVERYTHING) != 0 {
         io::print("failed to initialize SDL\n");
         return 1;
     }
 
-    var wnd_handle = sdl::create_window(
+    var wnd : sdl::Window;
+    wnd.init(
         "Snake Game",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
+        sdl::WINDOWPOS_CENTERED,
+        sdl::WINDOWPOS_CENTERED,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0
     );
 
-    var event_ptr = malloc(56);
+    var event_ptr = mem::allocate(56);
     var is_running: bool = 1;
-    var renderer_handle = sdl::create_renderer(wnd_handle, -1, 2);
-    var rect: Rect;
-    var snake = malloc(256*16);
+
+    var renderer: sdl::Renderer;
+    renderer.init(wnd, -1, 2);
+
+    var rect: sdl::Rect;
+    var snake = mem::allocate(256*16);
     var head: i32 = 2;
     var speed = 2;
-    var target_x = rand() % (WINDOW_WIDTH-CELL_WIDTH);
-    var target_y = rand() % (WINDOW_HEIGHT-CELL_HEIGHT);
+    var target_x = random::get_value(0, WINDOW_WIDTH-CELL_WIDTH);
+    var target_y = random::get_value(0, WINDOW_HEIGHT-CELL_HEIGHT);
 
     var x = 32;
     var index = 0;
@@ -92,23 +64,23 @@ extern fn main() : i32 {
         while sdl::poll_event(event_ptr) {
             ref event_type: i32 = *event_ptr;
 
-            if event_type == EVENT_QUIT {
+            if event_type == sdl::EVENT_QUIT {
                 is_running = 0;
             }
-            if event_type == EVENT_KEYDOWN {
-                ref kb_event: KeyboardEvent = *event_ptr;
+            if event_type == sdl::EVENT_KEYDOWN {
+                ref kb_event: sdl::KeyboardEvent = *event_ptr;
                 ref head_seg: SnakeSegment = snake[head];
 
-                if kb_event.keysym == KEY_W && head_seg.motion_y <= 0 {
+                if kb_event.keysym == sdl::KEY_W && head_seg.motion_y <= 0 {
                     head_seg.motion_x = 0;
                     head_seg.motion_y = -speed;
-                } else if kb_event.keysym == KEY_S && head_seg.motion_y >= 0 {
+                } else if kb_event.keysym == sdl::KEY_S && head_seg.motion_y >= 0 {
                     head_seg.motion_x = 0;
                     head_seg.motion_y = speed;
-                } else if kb_event.keysym == KEY_A && head_seg.motion_x <= 0 {
+                } else if kb_event.keysym == sdl::KEY_A && head_seg.motion_x <= 0 {
                     head_seg.motion_x = -speed;
                     head_seg.motion_y = 0;
-                } else if kb_event.keysym == KEY_D && head_seg.motion_x >= 0 {
+                } else if kb_event.keysym == sdl::KEY_D && head_seg.motion_x >= 0 {
                     head_seg.motion_x = speed;
                     head_seg.motion_y = 0;
                 }
@@ -161,8 +133,8 @@ extern fn main() : i32 {
            head_seg.y < target_y + CELL_HEIGHT &&
            head_seg.y + CELL_HEIGHT > target_y {
 
-            target_x = rand() % (WINDOW_WIDTH-32);
-            target_y = rand() % (WINDOW_HEIGHT-32);
+            target_x = random::get_value(0, WINDOW_WIDTH-32);
+            target_y = random::get_value(0, WINDOW_HEIGHT-32);
             speed = speed + 1;
 
             io::print("new apple position: ");
@@ -181,27 +153,27 @@ extern fn main() : i32 {
             }
         }
 
-        sdl::render_clear(renderer_handle);
+        renderer.clear();
 
-        sdl::set_render_draw_color(renderer_handle, 255, 0, 0, 255);
+        renderer.set_draw_color(255, 0, 0, 255);
 
         index = 0;
         while index <= head {
             ref seg: SnakeSegment = snake[index];
             rect.x = seg.x;
             rect.y = seg.y;
-            sdl::render_fill_rect(renderer_handle, &rect);
+            renderer.fill_rect(&rect);
             index = index + 1;
         }
 
-        sdl::set_render_draw_color(renderer_handle, 0, 255, 0, 255);
+        renderer.set_draw_color(0, 255, 0, 255);
         rect.x = target_x;
         rect.y = target_y;
-        sdl::render_fill_rect(renderer_handle, &rect);
+        renderer.fill_rect(&rect);
 
-        sdl::set_render_draw_color(renderer_handle, 0, 0, 0, 255);
+        renderer.set_draw_color(0, 0, 0, 255);
 
-        sdl::render_present(renderer_handle);
+        renderer.present();
         sdl::delay(15);
     }
 

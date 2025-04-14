@@ -1,5 +1,125 @@
 {
   "name": "sdl",
+  "constants": [
+    {
+      "name": "KEY_W",
+      "const_type": "i32",
+      "value": "26"
+    },
+    {
+      "name": "KEY_S",
+      "const_type": "i32",
+      "value": "22"
+    },
+    {
+      "name": "KEY_A",
+      "const_type": "i32",
+      "value": "4"
+    },
+    {
+      "name": "KEY_D",
+      "const_type": "i32",
+      "value": "7"
+    },
+    {
+      "name": "EVENT_QUIT",
+      "const_type": "i32",
+      "value": "256"
+    },
+    {
+      "name": "EVENT_KEYDOWN",
+      "const_type": "i32",
+      "value": "768"
+    },
+    {
+      "name": "INIT_EVERYTHING",
+      "const_type": "i32",
+      "value": "62001"
+    },
+    {
+      "name": "WINDOWPOS_CENTERED",
+      "const_type": "i32",
+      "value": "805240832"
+    }
+  ],
+  "structs": [
+    {
+      "name": "Window",
+      "arguments": [
+        {
+          "name": "handle",
+          "arg_type": "rawptr"
+        }
+      ]
+    },
+    {
+      "name": "Renderer",
+      "arguments": [
+        {
+          "name": "handle",
+          "arg_type": "rawptr"
+        }
+      ]
+    },
+    {
+      "name": "Rect",
+      "arguments": [
+        {
+          "name": "x",
+          "arg_type": "i32"
+        },
+        {
+          "name": "y",
+          "arg_type": "i32"
+        },
+        {
+          "name": "w",
+          "arg_type": "i32"
+        },
+        {
+          "name": "h",
+          "arg_type": "i32"
+        }
+      ]
+    },
+    {
+      "name": "KeyboardEvent",
+      "arguments": [
+        {
+          "name": "event_type",
+          "arg_type": "i32"
+        },
+        {
+          "name": "timestamp",
+          "arg_type": "i32"
+        },
+        {
+          "name": "windowID",
+          "arg_type": "i32"
+        },
+        {
+          "name": "state",
+          "arg_type": "i8"
+        },
+        {
+          "name": "repeat",
+          "arg_type": "i8"
+        },
+        {
+          "name": "padding2",
+          "arg_type": "i8"
+        },
+        {
+          "name": "padding3",
+          "arg_type": "i8"
+        },
+        {
+          "name": "keysym",
+          "arg_type": "i32"
+        }
+      ]
+    }
+  ],
   "functions": [
     {
       "name": "init",
@@ -13,9 +133,15 @@
       ]
     },
     {
-      "name": "create_window",
-      "return_type": "rawptr",
+      "name": "init",
+      "receiver": "Window",
+      "return_type": "void",
       "args": [
+        {
+          "name": "self",
+          "arg_type": "Window",
+          "is_ref": true
+        },
         {
           "name": "title",
           "arg_type": "rawptr",
@@ -60,13 +186,19 @@
       ]
     },
     {
-      "name": "create_renderer",
-      "return_type": "rawptr",
+      "name": "init",
+      "receiver": "Renderer",
+      "return_type": "void",
       "args": [
         {
+          "name": "self",
+          "arg_type": "Renderer",
+          "is_ref": true
+        },
+        {
           "name": "wnd",
-          "arg_type": "rawptr",
-          "is_ref": false
+          "arg_type": "Window",
+          "is_ref": true
         },
         {
           "name": "idk",
@@ -81,9 +213,15 @@
       ]
     },
     {
-      "name": "render_clear",
+      "name": "clear",
+      "receiver": "Renderer",
       "return_type": "i32",
       "args": [
+        {
+          "name": "self",
+          "arg_type": "Renderer",
+          "is_ref": true
+        },
         {
           "name": "renderer",
           "arg_type": "rawptr",
@@ -92,9 +230,15 @@
       ]
     },
     {
-      "name": "render_present",
+      "name": "present",
+      "receiver": "Renderer",
       "return_type": "void",
       "args": [
+        {
+          "name": "self",
+          "arg_type": "Renderer",
+          "is_ref": true
+        },
         {
           "name": "renderer",
           "arg_type": "rawptr",
@@ -114,9 +258,15 @@
       ]
     },
     {
-      "name": "set_render_draw_color",
+      "name": "set_draw_color",
+      "receiver": "Renderer",
       "return_type": "i32",
       "args": [
+        {
+          "name": "self",
+          "arg_type": "Renderer",
+          "is_ref": true
+        },
         {
           "name": "renderer",
           "arg_type": "rawptr",
@@ -145,9 +295,15 @@
       ]
     },
     {
-      "name": "render_fill_rect",
+      "name": "fill_rect",
+      "receiver": "Renderer",
       "return_type": "i32",
       "args": [
+        {
+          "name": "self",
+          "arg_type": "Renderer",
+          "is_ref": true
+        },
         {
           "name": "renderer",
           "arg_type": "rawptr",

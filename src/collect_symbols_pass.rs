@@ -59,7 +59,7 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
 
     fn visit_function(&mut self, node: &FunctionNode, path: &SymbolPath) -> CompilerResult<()> {
         let mut types = Vec::<FuncTypeArg<Type>>::new();
-        let sub_path = node.sub_path(path)?;
+        let sub_path = node.sub_path(node.location, self.symbol_table, path)?;
 
         for (i, param) in node.params.iter().enumerate() {
             types.push(FuncTypeArg {
@@ -135,7 +135,7 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
-        let module = Module::new(&format!("{}.json", node.module_name))
+        let module = Module::new(&format!("{}.json", node.module_name), node.location)
             .to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = SymbolPath::new(node.module_name.as_ref());
@@ -152,18 +152,14 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
             )
             .to_comp_res(node.location)?;
 
-        for (name, func) in &module.functions {
-            self.symbol_table
-                .add_symbol(
-                    &module_path,
-                    SymbolInfo {
-                        name: name.clone(),
-                        sym_type: SymbolType::FunctionDef,
-                        data_type: Type::Function(Box::new(func.clone())),
-                        location: node.location,
-                    },
-                )
-                .to_comp_res(node.location)?;
+        for struct_node in &module.structs {
+            self.visit_struct(struct_node, &module_path)?
+        }
+        for constant_node in &module.constants {
+            self.visit_const_decl(constant_node, &module_path)?
+        }
+        for func_node in &module.functions {
+            self.visit_function(func_node, &module_path)?;
         }
 
         Ok(())

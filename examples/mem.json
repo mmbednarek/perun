@@ -1,24 +1,24 @@
 {
-  "name": "io",
+  "name": "mem",
   "functions": [
     {
-      "name": "print",
-      "return_type": "void",
+      "name": "allocate",
+      "return_type": "rawptr",
       "args": [
         {
-          "name": "msg",
-          "arg_type": "rawptr",
+          "name": "size",
+          "arg_type": "i64",
           "is_ref": false
         }
       ]
     },
     {
-      "name": "print_int",
+      "name": "release",
       "return_type": "void",
       "args": [
         {
-          "name": "in_value",
-          "arg_type": "i32",
+          "name": "handle",
+          "arg_type": "rawptr",
           "is_ref": false
         }
       ]
