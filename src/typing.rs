@@ -1,6 +1,6 @@
 use crate::token::Keyword;
 use inkwell::context::Context;
-use inkwell::types::{AnyType, AnyTypeEnum, BasicTypeEnum};
+use inkwell::types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,45 +10,65 @@ pub struct Identifier {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FuncTypeArg<T> {
+pub struct FuncTypeArg {
     pub is_ref: bool,
-    pub arg_type: T,
+    pub arg_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FuncType<T> {
-    pub args: Vec<FuncTypeArg<T>>,
-    pub ret_type: T,
+pub struct FuncType {
+    pub args: Vec<FuncTypeArg>,
+    pub ret_type: Type,
 }
 
-pub type FuncTypeBox<T> = Box<FuncType<T>>;
+pub type FuncTypeBox = Box<FuncType>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructType<T> {
-    pub fields: Vec<T>,
+pub struct StructType {
+    pub fields: Vec<Type>,
 }
 
-type StructTypeBox<T> = Box<StructType<T>>;
+type StructTypeBox = Box<StructType>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataSize {
+    Bits8,
+    Bits16,
+    Bits32,
+    Bits64,
+}
+
+impl DataSize {
+    pub fn bit_count(&self) -> u32 {
+        match self {
+            DataSize::Bits8 => 8,
+            DataSize::Bits16 => 16,
+            DataSize::Bits32 => 32,
+            DataSize::Bits64 => 64,
+        }
+    }
+
+    pub fn byte_count(&self) -> u32 {
+        self.bit_count() / 8
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Void,
     RawPtr,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Float32,
-    Float64,
+    Integer(/*is_signed: */ bool, /*size: */ DataSize),
+    FloatingPoint(DataSize),
+    StaticArray(Box<Type>, u32),
     Bool,
-    Struct(StructTypeBox<Type>),
+    Struct(StructTypeBox),
     Alias(Identifier),
-    Function(FuncTypeBox<Type>),
+    Function(FuncTypeBox),
 }
 
 fn struct_to_llvm_type<'ctx>(
     ctx: &'ctx Context,
-    struct_type: &StructType<Type>,
+    struct_type: &StructType,
 ) -> Option<inkwell::types::StructType<'ctx>> {
     let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
     for field in &struct_type.fields {
@@ -62,11 +82,16 @@ impl Type {
     pub fn from_string(namespace: Option<String>, s: &str) -> Type {
         match s {
             "void" => Type::Void,
-            "i8" => Type::Int8,
-            "i16" => Type::Int16,
-            "i32" => Type::Int32,
-            "i64" => Type::Int64,
-            "f32" => Type::Float32,
+            "i8" => Type::Integer(true, DataSize::Bits8),
+            "i16" => Type::Integer(true, DataSize::Bits16),
+            "i32" => Type::Integer(true, DataSize::Bits32),
+            "i64" => Type::Integer(true, DataSize::Bits64),
+            "u8" => Type::Integer(false, DataSize::Bits8),
+            "u16" => Type::Integer(false, DataSize::Bits16),
+            "u32" => Type::Integer(false, DataSize::Bits32),
+            "u64" => Type::Integer(false, DataSize::Bits64),
+            "f32" => Type::FloatingPoint(DataSize::Bits32),
+            "f64" => Type::FloatingPoint(DataSize::Bits64),
             "bool" => Type::Bool,
             "rawptr" => Type::RawPtr,
             _ => Type::Alias(Identifier {
@@ -80,12 +105,16 @@ impl Type {
         match kw {
             Keyword::Void => Some(Type::Void),
             Keyword::RawPtr => Some(Type::RawPtr),
-            Keyword::Int8 => Some(Type::Int8),
-            Keyword::Int16 => Some(Type::Int16),
-            Keyword::Int32 => Some(Type::Int32),
-            Keyword::Int64 => Some(Type::Int64),
-            Keyword::Float32 => Some(Type::Float32),
-            Keyword::Float64 => Some(Type::Float64),
+            Keyword::Int8 => Some(Type::Integer(true, DataSize::Bits8)),
+            Keyword::Int16 => Some(Type::Integer(true, DataSize::Bits16)),
+            Keyword::Int32 => Some(Type::Integer(true, DataSize::Bits32)),
+            Keyword::Int64 => Some(Type::Integer(true, DataSize::Bits64)),
+            Keyword::UInt8 => Some(Type::Integer(false, DataSize::Bits8)),
+            Keyword::UInt16 => Some(Type::Integer(false, DataSize::Bits16)),
+            Keyword::UInt32 => Some(Type::Integer(false, DataSize::Bits32)),
+            Keyword::UInt64 => Some(Type::Integer(false, DataSize::Bits64)),
+            Keyword::Float32 => Some(Type::FloatingPoint(DataSize::Bits32)),
+            Keyword::Float64 => Some(Type::FloatingPoint(DataSize::Bits64)),
             Keyword::Bool => Some(Type::Bool),
             _ => None,
         }
@@ -96,12 +125,16 @@ impl Type {
             Type::RawPtr => Some(BasicTypeEnum::PointerType(
                 ctx.ptr_type(inkwell::AddressSpace::from(0)),
             )),
-            Type::Int8 => Some(BasicTypeEnum::IntType(ctx.i8_type())),
-            Type::Int16 => Some(BasicTypeEnum::IntType(ctx.i16_type())),
-            Type::Int32 => Some(BasicTypeEnum::IntType(ctx.i32_type())),
-            Type::Int64 => Some(BasicTypeEnum::IntType(ctx.i64_type())),
-            Type::Float32 => Some(BasicTypeEnum::FloatType(ctx.f32_type())),
-            Type::Float64 => Some(BasicTypeEnum::FloatType(ctx.f64_type())),
+            Type::Integer(_, bits) => Some(ctx.custom_width_int_type(bits.bit_count()).into()),
+            Type::FloatingPoint(bits) => match bits {
+                DataSize::Bits8 => None,
+                DataSize::Bits16 => Some(ctx.f16_type().into()),
+                DataSize::Bits32 => Some(ctx.f32_type().into()),
+                DataSize::Bits64 => Some(ctx.f64_type().into()),
+            },
+            Type::StaticArray(sub_type, count) => {
+                Some(sub_type.to_llvm_basic_type(ctx)?.array_type(*count).into())
+            }
             Type::Bool => Some(BasicTypeEnum::IntType(ctx.bool_type())),
             Type::Struct(struct_type) => Some(BasicTypeEnum::StructType(struct_to_llvm_type(
                 ctx,
@@ -120,10 +153,7 @@ impl Type {
 
     pub fn is_int_type(&self) -> bool {
         match self {
-            Type::Int8 => true,
-            Type::Int16 => true,
-            Type::Int32 => true,
-            Type::Int64 => true,
+            Type::Integer(_, _) => true,
             Type::Bool => true,
             _ => false,
         }
@@ -145,20 +175,15 @@ impl Type {
 
     pub fn is_float_type(&self) -> bool {
         match self {
-            Type::Float32 => true,
-            Type::Float64 => true,
+            Type::FloatingPoint(_) => true,
             _ => false,
         }
     }
 
-    pub fn byte_count(&self) -> Option<i32> {
+    pub fn byte_count(&self) -> Option<u32> {
         match self {
-            Type::Int8 => Some(1),
-            Type::Int16 => Some(2),
-            Type::Int32 => Some(4),
-            Type::Int64 => Some(8),
-            Type::Float32 => Some(4),
-            Type::Float64 => Some(8),
+            Type::Integer(_, size) => Some(size.byte_count()),
+            Type::FloatingPoint(size) => Some(size.byte_count()),
             _ => None,
         }
     }
@@ -189,22 +214,40 @@ impl Type {
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str: String = match self {
-            Type::Void => "void",
-            Type::RawPtr => "rawptr",
-            Type::Int8 => "i8",
-            Type::Int16 => "i16",
-            Type::Int32 => "i32",
-            Type::Int64 => "i64",
-            Type::Float32 => "f32",
-            Type::Float64 => "f64",
-            Type::Bool => "bool",
-            Type::Struct(_) => "struct",
-            Type::Alias(v) => &v.value,
-            Type::Function(_) => "function",
+        match self {
+            Type::Void => write!(f, "void"),
+            Type::RawPtr => write!(f, "rawptr"),
+            Type::Integer(is_signed, size) => write!(
+                f,
+                "{}{}",
+                if *is_signed { "i" } else { "u" },
+                size.bit_count()
+            ),
+            Type::FloatingPoint(size) => write!(f, "f{}", size.bit_count()),
+            Type::StaticArray(sub_type, count) => {
+                sub_type.as_ref().fmt(f)?;
+                write!(f, "[{}]", *count)
+            }
+            Type::Bool => write!(f, "bool"),
+            Type::Struct(args) => {
+                write!(f, "struct {{")?;
+                for field in &args.fields {
+                    write!(f, "{},", field)?;
+                }
+                write!(f, "}}")
+            }
+            Type::Alias(v) => write!(f, "{}", &v.value),
+            Type::Function(func_type) => {
+                write!(f, "fn (")?;
+                for field in &func_type.args {
+                    if field.is_ref {
+                        write!(f, "ref ")?;
+                    }
+                    write!(f, "{},", field.arg_type)?;
+                }
+                write!(f, ") : {}", func_type.ret_type)
+            }
         }
-        .into();
-        write!(f, "{}", str)
     }
 }
 
@@ -219,6 +262,7 @@ macro_rules! visit_type {
             AnyTypeEnum::IntType($y) => $z,
             AnyTypeEnum::FloatType($y) => $z,
             AnyTypeEnum::StructType($y) => $z,
+            AnyTypeEnum::ArrayType($y) => $z,
             _ => Err(crate::error::CompilerError {
                 location: $loc,
                 message: format!("failed to map to llvm type: {:?}", *$x),
@@ -238,6 +282,7 @@ macro_rules! visit_any_type {
             AnyTypeEnum::IntType($y) => $z,
             AnyTypeEnum::FloatType($y) => $z,
             AnyTypeEnum::StructType($y) => $z,
+            AnyTypeEnum::ArrayType($y) => $z,
             AnyTypeEnum::VoidType($y) => $z,
             _ => Err(crate::error::CompilerError {
                 location: $loc,

@@ -347,7 +347,7 @@ where
 
     fn parse_type(&mut self) -> CompilerResult<Type> {
         let token = self.reader.next()?.clone();
-        match &token.token_type {
+        let base_type = match &token.token_type {
             TokenType::Keyword(kw) => {
                 let arg_type_res = Type::from_keyword(kw);
                 match arg_type_res {
@@ -378,6 +378,21 @@ where
             _ => {
                 compiler_err!(token.location, "invalid token {:?}", token.token_type)
             }
+        }?;
+
+        let left_bracket_tkn = self.reader.peek()?.clone();
+        if left_bracket_tkn.token_type == TokenType::Operator(OperatorType::LeftSquare) {
+            self.reader.next()?;
+            let count_tkn = self.reader.next()?.clone();
+            if let TokenType::Number(count) = count_tkn.token_type {
+                self.reader
+                    .expect_token(TokenType::Operator(OperatorType::RightSquare))?;
+                Ok(Type::StaticArray(Box::new(base_type), count as u32))
+            } else {
+                compiler_err!(count_tkn.location, "missing count of array");
+            }
+        } else {
+            Ok(base_type)
         }
     }
 

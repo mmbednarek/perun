@@ -38,7 +38,7 @@ fn main() : i32 {
     renderer.init(wnd, -1, 2);
 
     var rect: sdl::Rect;
-    var snake = mem::allocate(256*16);
+    var snake: SnakeSegment[256];
     var head: i32 = 2;
     var speed = 2;
     var target_x = random::get_value(0, WINDOW_WIDTH-CELL_WIDTH);
@@ -47,7 +47,7 @@ fn main() : i32 {
     var x = 32;
     var index = 0;
     while index <= head {
-        ref segment: SnakeSegment = snake[index];
+        ref segment = snake[index];
         segment.x = x;
         segment.y = 128;
         segment.motion_x = 0;
@@ -69,7 +69,7 @@ fn main() : i32 {
             }
             if event_type == sdl::EVENT_KEYDOWN {
                 ref kb_event: sdl::KeyboardEvent = *event_ptr;
-                ref head_seg: SnakeSegment = snake[head];
+                ref head_seg = snake[head];
 
                 if kb_event.keysym == sdl::KEY_W && head_seg.motion_y <= 0 {
                     head_seg.motion_x = 0;
@@ -89,8 +89,8 @@ fn main() : i32 {
 
         var index = 0;
         while index < head {
-            ref seg: SnakeSegment = snake[index];
-            ref next_seg: SnakeSegment = snake[index+1];
+            ref seg = snake[index];
+            ref next_seg = snake[index+1];
 
             if next_seg.motion_x != 0 && (seg.motion_y >= 0 && seg.y >= next_seg.y || seg.motion_y <= 0 && seg.y <= next_seg.y) {
                 if next_seg.motion_x > 0 {
@@ -119,14 +119,14 @@ fn main() : i32 {
 
         index = 0;
         while index <= head {
-            ref seg: SnakeSegment = snake[index];
+            ref seg = snake[index];
             seg.x = seg.x + seg.motion_x;
             seg.y = seg.y + seg.motion_y;
             index = index + 1;
         }
 
         // Check if reached target AABB
-        ref head_seg: SnakeSegment = snake[head];
+        ref head_seg = snake[head];
 
         if head_seg.x < target_x + CELL_WIDTH &&
            head_seg.x + CELL_WIDTH > target_x &&
@@ -145,7 +145,7 @@ fn main() : i32 {
 
             if head < 255 {
                 head = head + 1;
-                ref new_head_seg: SnakeSegment = snake[head];
+                ref new_head_seg = snake[head];
                 new_head_seg.x = head_seg.x;
                 new_head_seg.y = head_seg.y;
                 new_head_seg.motion_x = head_seg.motion_x;
@@ -159,7 +159,7 @@ fn main() : i32 {
 
         index = 0;
         while index <= head {
-            ref seg: SnakeSegment = snake[index];
+            ref seg = snake[index];
             rect.x = seg.x;
             rect.y = seg.y;
             renderer.fill_rect(&rect);

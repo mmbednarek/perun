@@ -7,7 +7,7 @@ use crate::module_api::{load_module, ModuleCore};
 use crate::parser::Parser;
 use crate::token::{Location, OperatorType, Token, TokenType};
 use crate::token_reader::TokenReader;
-use crate::typing::Type;
+use crate::typing::{DataSize, Type};
 
 pub struct Module {
     pub name: String,
@@ -154,7 +154,7 @@ impl Module {
                 const_type: constant
                     .const_type
                     .clone()
-                    .unwrap_or(Type::Int32)
+                    .unwrap_or(Type::Integer(true, DataSize::Bits32))
                     .to_string(),
                 value: expression_to_string(&constant.value),
             })

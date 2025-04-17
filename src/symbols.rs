@@ -186,6 +186,10 @@ impl SymbolTable {
                 let symbol = self.find_identifier(path, &alias)?;
                 Ok(symbol.data_type.clone())
             }
+            Type::StaticArray(subtype, count) => {
+                let resolved_subtype = self.resolve_type_alias(path, subtype.as_ref().clone())?;
+                Ok(Type::StaticArray(Box::new(resolved_subtype), count))
+            }
             tp => Ok(tp),
         }
     }

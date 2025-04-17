@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::symbols::{SymbolPath, SymbolTable};
-use crate::typing::Type;
+use crate::typing::{DataSize, Type};
 
 pub struct TypeDeductionPass<'st> {
     symbol_table: &'st SymbolTable,
@@ -22,8 +22,14 @@ impl<'st> TypeDeductionPass<'st> {
         node: &BinaryExpressionNode,
         pd: &Payload,
     ) -> CompilerResult<(Type, Type)> {
-        let left_deduced_type = self.visit_expression(&node.left, pd)?;
         let right_deduced_type = self.visit_expression(&node.right, pd)?;
+        let left_deduced_type = self.visit_expression(
+            &node.left,
+            &Payload {
+                path: pd.path.clone(),
+                expected_type: right_deduced_type.clone(),
+            },
+        )?;
 
         if node.operation == BinaryOperation::Assign {
             if left_deduced_type.is_void() {
@@ -92,9 +98,9 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
             Ok(pd.expected_type.clone())
         } else {
             if u32::try_from(node.number).is_ok() {
-                Ok(Type::Int32)
+                Ok(Type::Integer(true, DataSize::Bits32))
             } else {
-                Ok(Type::Int64)
+                Ok(Type::Integer(true, DataSize::Bits64))
             }
         }
     }
@@ -145,8 +151,18 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
         );
     }
 
-    fn visit_get_element(&self, _: &GetElementNode, pd: &Payload) -> CompilerResult<Type> {
-        Ok(pd.expected_type.clone())
+    fn visit_get_element(&self, node: &GetElementNode, pd: &Payload) -> CompilerResult<Type> {
+        if pd.expected_type != Type::Void {
+            return Ok(pd.expected_type.clone());
+        }
+
+        let expr = self.visit_expression(node.object.as_ref(), pd)?;
+        match expr {
+            Type::StaticArray(sub_type, _) => Ok(sub_type.as_ref().clone()),
+            _ => {
+                compiler_err!(node.location, "invalid object type")
+            }
+        }
     }
 
     fn visit_get_field(&self, node: &GetFieldNode, pd: &Payload) -> CompilerResult<Type> {

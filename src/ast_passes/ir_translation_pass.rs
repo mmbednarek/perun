@@ -5,7 +5,7 @@ use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::module::Module;
 use crate::symbols::{SymbolPath, SymbolType};
 use crate::token::Location;
-use crate::typing::{FuncTypeBox, Type, ValueType};
+use crate::typing::{DataSize, FuncTypeBox, Type, ValueType};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
@@ -184,7 +184,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         &self,
         path: &SymbolPath,
         function: &FunctionValue<'ctx>,
-        fn_type: &FuncTypeBox<Type>,
+        fn_type: &FuncTypeBox,
         args: &[ExpressionBox],
         arg_offset: usize,
         call_args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
@@ -1519,19 +1519,26 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &GetElementNode,
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
+        let obj_type = self.deduce_type(pd.path.clone(), Type::Void, node.object.as_ref())?;
+        let value_type = if obj_type.is_ptr_type() {
+            ValueType::RValue
+        } else {
+            ValueType::LValue
+        };
+
         let obj_value = self.visit_expression(
             node.object.as_ref(),
             &ExpressionPayload {
                 path: pd.path.clone(),
                 function: pd.function,
                 expected_type: Type::RawPtr,
-                value_type: ValueType::RValue,
+                value_type,
             },
         )?;
         let obj_ptr = obj_value.as_ref().to_ptr(node.location)?;
         let index_type = self.deduce_type(
             pd.path.clone(),
-            pd.expected_type.clone(),
+            Type::Integer(false, DataSize::Bits32),
             node.index.as_ref(),
         )?;
         let index_value = self.visit_expression(
@@ -1545,10 +1552,15 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
         let index = index_value.as_ref().to_int(node.location)?;
 
+        let element_type = match obj_type {
+            Type::StaticArray(sub_type, _) => sub_type.as_ref().clone(),
+            _ => pd.expected_type.clone(),
+        };
+
         let indexed_ptr = self.build_get_element_ptr(
             node.location,
             &pd.path,
-            &pd.expected_type,
+            &element_type,
             obj_ptr,
             &[index],
             "addrindex",

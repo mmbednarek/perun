@@ -62,7 +62,7 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
     }
 
     fn visit_function(&mut self, node: &FunctionNode, path: &SymbolPath) -> CompilerResult<()> {
-        let mut types = Vec::<FuncTypeArg<Type>>::new();
+        let mut types = Vec::<FuncTypeArg>::new();
         let sub_path = node.sub_path(node.location, self.symbol_table, path)?;
 
         for (i, param) in node.params.iter().enumerate() {
