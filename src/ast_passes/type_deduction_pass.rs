@@ -125,7 +125,14 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
     ) -> CompilerResult<Type> {
         match node.operation {
             SingularOperation::AddressOf => Ok(Type::RawPtr),
-            SingularOperation::Deference => Ok(pd.expected_type.clone()),
+            SingularOperation::Deference => {
+                let expr_type = self.visit_expression(node.expr.as_ref(), pd)?;
+                match expr_type {
+                    Type::RawPtr => Ok(pd.expected_type.clone()),
+                    Type::TypedPtr(sub_type) => Ok(sub_type.as_ref().clone()),
+                    _ => compiler_err!(node.location, "cannot dereference non pointer type"),
+                }
+            }
             SingularOperation::Not => Ok(Type::Bool),
             SingularOperation::Minus => Ok(pd.expected_type.clone()),
         }
@@ -158,6 +165,7 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
 
         let expr = self.visit_expression(node.object.as_ref(), pd)?;
         match expr {
+            Type::TypedPtr(sub_type) => Ok(sub_type.as_ref().clone()),
             Type::StaticArray(sub_type, _) => Ok(sub_type.as_ref().clone()),
             _ => {
                 compiler_err!(node.location, "invalid object type")

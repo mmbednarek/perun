@@ -375,6 +375,10 @@ where
                     },
                 ))
             }
+            TokenType::Operator(OperatorType::Asterisk) => {
+                let sub_type = self.parse_type()?;
+                Ok(Type::TypedPtr(Box::new(sub_type)))
+            }
             _ => {
                 compiler_err!(token.location, "invalid token {:?}", token.token_type)
             }

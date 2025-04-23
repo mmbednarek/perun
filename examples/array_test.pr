@@ -1,5 +1,7 @@
 
 fn main(): i32 {
-    var values: rawptr;
-    return values[1];
+    var values: *i64;
+    var value = *values;
+
+    return value;
 }

@@ -57,6 +57,7 @@ impl DataSize {
 pub enum Type {
     Void,
     RawPtr,
+    TypedPtr(Box<Type>),
     Integer(/*is_signed: */ bool, /*size: */ DataSize),
     FloatingPoint(DataSize),
     StaticArray(Box<Type>, u32),
@@ -122,7 +123,7 @@ impl Type {
 
     pub fn to_llvm_basic_type<'ctx>(&self, ctx: &'ctx Context) -> Option<BasicTypeEnum<'ctx>> {
         match self {
-            Type::RawPtr => Some(BasicTypeEnum::PointerType(
+            Type::RawPtr | Type::TypedPtr(_) => Some(BasicTypeEnum::PointerType(
                 ctx.ptr_type(inkwell::AddressSpace::from(0)),
             )),
             Type::Integer(_, bits) => Some(ctx.custom_width_int_type(bits.bit_count()).into()),
@@ -217,6 +218,10 @@ impl Display for Type {
         match self {
             Type::Void => write!(f, "void"),
             Type::RawPtr => write!(f, "rawptr"),
+            Type::TypedPtr(sub_type) => {
+                write!(f, "*")?;
+                sub_type.as_ref().fmt(f)
+            }
             Type::Integer(is_signed, size) => write!(
                 f,
                 "{}{}",
