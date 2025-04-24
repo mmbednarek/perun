@@ -4,74 +4,137 @@ use crate::token::{Location, OperatorType};
 use crate::typing::{Identifier, Type, ValueType};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum BinaryOperation {
+pub enum MathBinaryOperation {
     Add,
     Subtract,
     Multiply,
     Divide,
+    Modulo,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum AssignmentBinaryOperation {
+    Assign,
+    Math(MathBinaryOperation),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ComparisonBinaryOperation {
+    Equals,
+    NotEquals,
     Less,
     LessOrEqual,
     Greater,
     GreaterOrEqual,
-    Equals,
-    NotEquals,
-    Assign,
-    Modulo,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum LogicalBinaryOperation {
     LogicalAnd,
     LogicalOr,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BinaryOperation {
+    Assignment(AssignmentBinaryOperation),
+    Math(MathBinaryOperation),
+    Comparison(ComparisonBinaryOperation),
+    Logical(LogicalBinaryOperation),
 }
 
 impl BinaryOperation {
     pub fn from_op_type(op_type: OperatorType) -> Option<BinaryOperation> {
         match op_type {
-            OperatorType::Plus => Some(BinaryOperation::Add),
-            OperatorType::Minus => Some(BinaryOperation::Subtract),
-            OperatorType::Asterisk => Some(BinaryOperation::Multiply),
-            OperatorType::Slash => Some(BinaryOperation::Divide),
-            OperatorType::Less => Some(BinaryOperation::Less),
-            OperatorType::LessOrEqual => Some(BinaryOperation::LessOrEqual),
-            OperatorType::Greater => Some(BinaryOperation::Greater),
-            OperatorType::GreaterOrEqual => Some(BinaryOperation::GreaterOrEqual),
-            OperatorType::EqualsEquals => Some(BinaryOperation::Equals),
-            OperatorType::NotEquals => Some(BinaryOperation::NotEquals),
-            OperatorType::Equals => Some(BinaryOperation::Assign),
-            OperatorType::Percent => Some(BinaryOperation::Modulo),
-            OperatorType::LogicalAnd => Some(BinaryOperation::LogicalAnd),
-            OperatorType::LogicalOr => Some(BinaryOperation::LogicalOr),
+            OperatorType::Plus => Some(BinaryOperation::Math(MathBinaryOperation::Add)),
+            OperatorType::Minus => Some(BinaryOperation::Math(MathBinaryOperation::Subtract)),
+            OperatorType::Asterisk => Some(BinaryOperation::Math(MathBinaryOperation::Multiply)),
+            OperatorType::Slash => Some(BinaryOperation::Math(MathBinaryOperation::Divide)),
+            OperatorType::Less => {
+                Some(BinaryOperation::Comparison(ComparisonBinaryOperation::Less))
+            }
+            OperatorType::LessOrEqual => Some(BinaryOperation::Comparison(
+                ComparisonBinaryOperation::LessOrEqual,
+            )),
+            OperatorType::Greater => Some(BinaryOperation::Comparison(
+                ComparisonBinaryOperation::Greater,
+            )),
+            OperatorType::GreaterOrEqual => Some(BinaryOperation::Comparison(
+                ComparisonBinaryOperation::GreaterOrEqual,
+            )),
+            OperatorType::EqualsEquals => Some(BinaryOperation::Comparison(
+                ComparisonBinaryOperation::Equals,
+            )),
+            OperatorType::NotEquals => Some(BinaryOperation::Comparison(
+                ComparisonBinaryOperation::NotEquals,
+            )),
+            OperatorType::Equals => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Assign,
+            )),
+            OperatorType::Percent => Some(BinaryOperation::Math(MathBinaryOperation::Modulo)),
+            OperatorType::LogicalAnd => {
+                Some(BinaryOperation::Logical(LogicalBinaryOperation::LogicalAnd))
+            }
+            OperatorType::LogicalOr => {
+                Some(BinaryOperation::Logical(LogicalBinaryOperation::LogicalOr))
+            }
+            OperatorType::Increase => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Math(MathBinaryOperation::Add),
+            )),
+            OperatorType::Decrease => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Math(MathBinaryOperation::Subtract),
+            )),
+            OperatorType::MultiplyAssign => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Math(MathBinaryOperation::Multiply),
+            )),
+            OperatorType::DivideAssign => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Math(MathBinaryOperation::Divide),
+            )),
+            OperatorType::ModuloAssign => Some(BinaryOperation::Assignment(
+                AssignmentBinaryOperation::Math(MathBinaryOperation::Modulo),
+            )),
             _ => None,
         }
     }
 
     pub fn is_predicate(&self) -> bool {
         match self {
-            BinaryOperation::Less => true,
-            BinaryOperation::LessOrEqual => true,
-            BinaryOperation::Greater => true,
-            BinaryOperation::GreaterOrEqual => true,
-            BinaryOperation::Equals => true,
-            BinaryOperation::NotEquals => true,
-            BinaryOperation::LogicalAnd => true,
-            BinaryOperation::LogicalOr => true,
+            BinaryOperation::Comparison(_) => true,
+            BinaryOperation::Logical(_) => true,
             _ => false,
         }
     }
 
     pub fn precedence(&self) -> i32 {
         match self {
-            BinaryOperation::Add => 5,
-            BinaryOperation::Subtract => 5,
-            BinaryOperation::Divide => 6,
-            BinaryOperation::Multiply => 6,
-            BinaryOperation::Modulo => 6,
-            BinaryOperation::Less => 4,
-            BinaryOperation::LessOrEqual => 4,
-            BinaryOperation::Greater => 4,
-            BinaryOperation::GreaterOrEqual => 4,
-            BinaryOperation::Equals => 4,
-            BinaryOperation::NotEquals => 4,
-            BinaryOperation::LogicalAnd => 3,
-            BinaryOperation::LogicalOr => 2,
-            BinaryOperation::Assign => 1,
+            BinaryOperation::Math(MathBinaryOperation::Add) => 5,
+            BinaryOperation::Math(MathBinaryOperation::Subtract) => 5,
+            BinaryOperation::Math(MathBinaryOperation::Divide) => 6,
+            BinaryOperation::Math(MathBinaryOperation::Multiply) => 6,
+            BinaryOperation::Math(MathBinaryOperation::Modulo) => 6,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::Less) => 4,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::LessOrEqual) => 4,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::Greater) => 4,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::GreaterOrEqual) => 4,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::Equals) => 4,
+            BinaryOperation::Comparison(ComparisonBinaryOperation::NotEquals) => 4,
+            BinaryOperation::Logical(LogicalBinaryOperation::LogicalAnd) => 3,
+            BinaryOperation::Logical(LogicalBinaryOperation::LogicalOr) => 2,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Assign) => 1,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Math(
+                MathBinaryOperation::Add,
+            )) => 1,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Math(
+                MathBinaryOperation::Subtract,
+            )) => 1,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Math(
+                MathBinaryOperation::Multiply,
+            )) => 1,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Math(
+                MathBinaryOperation::Divide,
+            )) => 1,
+            BinaryOperation::Assignment(AssignmentBinaryOperation::Math(
+                MathBinaryOperation::Modulo,
+            )) => 1,
         }
     }
 
@@ -613,7 +676,7 @@ pub struct BinaryExpressionNode {
 impl BinaryExpressionNode {
     pub fn get_left_value_type(&self) -> ValueType {
         match self.operation {
-            BinaryOperation::Assign => ValueType::LValue,
+            BinaryOperation::Assignment(_) => ValueType::LValue,
             _ => ValueType::RValue,
         }
     }

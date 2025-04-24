@@ -163,6 +163,7 @@ impl Type {
     pub fn is_ptr_type(&self) -> bool {
         match self {
             Type::RawPtr => true,
+            Type::TypedPtr(_) => true,
             _ => false,
         }
     }

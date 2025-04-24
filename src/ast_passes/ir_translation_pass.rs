@@ -8,123 +8,243 @@ use crate::token::Location;
 use crate::typing::{DataSize, FuncTypeBox, Type, ValueType};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
+use inkwell::builder::Builder;
 use inkwell::module::Linkage;
 use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{
-    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatMathValue, FunctionValue,
+    IntMathValue, IntValue, PointerValue,
 };
-use inkwell::AddressSpace;
-use inkwell::IntPredicate;
+use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
-impl BinaryOperation {
-    pub fn to_llvm_int_predicate(&self) -> Option<IntPredicate> {
+impl AssignmentBinaryOperation {
+    pub fn get_stored_value<'ctx, 'st>(
+        &self,
+        location: Location,
+        gen: &IRBuildContext<'ctx, 'st>,
+        operand_type: &Type,
+        lhs: PointerValue<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
         match self {
-            BinaryOperation::Less => Some(IntPredicate::SLT),
-            BinaryOperation::LessOrEqual => Some(IntPredicate::SLE),
-            BinaryOperation::Greater => Some(IntPredicate::SGT),
-            BinaryOperation::GreaterOrEqual => Some(IntPredicate::SGE),
-            BinaryOperation::Equals => Some(IntPredicate::EQ),
-            BinaryOperation::NotEquals => Some(IntPredicate::NE),
-            _ => None,
+            AssignmentBinaryOperation::Assign => Ok(Box::new(rhs)),
+            AssignmentBinaryOperation::Math(op) => {
+                let llvm_type = operand_type
+                    .to_llvm_basic_type(gen.context)
+                    .to_comp_res_with_desc(location, "failed to map type")?;
+
+                let lhs_loaded = gen
+                    .builder
+                    .build_load(llvm_type, lhs, "inc.lhs")
+                    .to_comp_res(location)?;
+
+                op.build_instruction(location, &gen.builder, operand_type, lhs_loaded, rhs)
+            }
+        }
+    }
+}
+
+impl ComparisonBinaryOperation {
+    pub fn to_llvm_int_predicate(&self, is_signed: bool) -> IntPredicate {
+        match self {
+            ComparisonBinaryOperation::Equals => IntPredicate::EQ,
+            ComparisonBinaryOperation::NotEquals => IntPredicate::NE,
+            ComparisonBinaryOperation::Less => {
+                if is_signed {
+                    IntPredicate::SLT
+                } else {
+                    IntPredicate::ULT
+                }
+            }
+            ComparisonBinaryOperation::LessOrEqual => {
+                if is_signed {
+                    IntPredicate::SLE
+                } else {
+                    IntPredicate::ULE
+                }
+            }
+            ComparisonBinaryOperation::Greater => {
+                if is_signed {
+                    IntPredicate::SGT
+                } else {
+                    IntPredicate::UGT
+                }
+            }
+            ComparisonBinaryOperation::GreaterOrEqual => {
+                if is_signed {
+                    IntPredicate::SGE
+                } else {
+                    IntPredicate::UGE
+                }
+            }
         }
     }
 
-    pub fn build<'ctx, 'st>(
+    pub fn to_llvm_float_predicate(&self) -> FloatPredicate {
+        match self {
+            ComparisonBinaryOperation::Equals => FloatPredicate::OEQ,
+            ComparisonBinaryOperation::NotEquals => FloatPredicate::ONE,
+            ComparisonBinaryOperation::Less => FloatPredicate::OLT,
+            ComparisonBinaryOperation::LessOrEqual => FloatPredicate::OLE,
+            ComparisonBinaryOperation::Greater => FloatPredicate::OGT,
+            ComparisonBinaryOperation::GreaterOrEqual => FloatPredicate::OGE,
+        }
+    }
+}
+
+impl MathBinaryOperation {
+    fn build_int_instruction<'ctx, T: IntMathValue<'ctx>>(
+        &self,
+        location: Location,
+        builder: &Builder<'ctx>,
+        lhs: T,
+        rhs: T,
+        is_signed: bool,
+    ) -> CompilerResult<T> {
+        match self {
+            MathBinaryOperation::Add => {
+                builder.build_int_add(lhs, rhs, "add").to_comp_res(location)
+            }
+            MathBinaryOperation::Subtract => {
+                builder.build_int_sub(lhs, rhs, "sub").to_comp_res(location)
+            }
+            MathBinaryOperation::Multiply => {
+                builder.build_int_mul(lhs, rhs, "mul").to_comp_res(location)
+            }
+            MathBinaryOperation::Divide => if is_signed {
+                builder.build_int_signed_div(lhs, rhs, "sdiv")
+            } else {
+                builder.build_int_unsigned_div(lhs, rhs, "udiv")
+            }
+            .to_comp_res(location),
+            MathBinaryOperation::Modulo => if is_signed {
+                builder.build_int_signed_rem(lhs, rhs, "srem")
+            } else {
+                builder.build_int_unsigned_rem(lhs, rhs, "urem")
+            }
+            .to_comp_res(location),
+        }
+    }
+
+    fn build_float_instruction<'ctx, T: FloatMathValue<'ctx>>(
+        &self,
+        location: Location,
+        builder: &Builder<'ctx>,
+        lhs: T,
+        rhs: T,
+    ) -> CompilerResult<T> {
+        match self {
+            MathBinaryOperation::Add => builder
+                .build_float_add(lhs, rhs, "fadd")
+                .to_comp_res(location),
+            MathBinaryOperation::Subtract => builder
+                .build_float_sub(lhs, rhs, "fsub")
+                .to_comp_res(location),
+            MathBinaryOperation::Multiply => builder
+                .build_float_mul(lhs, rhs, "fmul")
+                .to_comp_res(location),
+            MathBinaryOperation::Divide => builder
+                .build_float_div(lhs, rhs, "fdiv")
+                .to_comp_res(location),
+            MathBinaryOperation::Modulo => builder
+                .build_float_rem(lhs, rhs, "frem")
+                .to_comp_res(location),
+        }
+    }
+
+    fn build_instruction<'ctx>(
+        &self,
+        location: Location,
+        builder: &Builder<'ctx>,
+        operand_type: &Type,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        match operand_type {
+            Type::Integer(is_signed, _) => {
+                let lhs_int = lhs.to_int(location)?;
+                let rhs_int = rhs.to_int(location)?;
+
+                Ok(Box::new(self.build_int_instruction(
+                    location, builder, lhs_int, rhs_int, *is_signed,
+                )?))
+            }
+            Type::FloatingPoint(_) => {
+                let lhs_float = lhs.to_float(location)?;
+                let rhs_float = rhs.to_float(location)?;
+
+                Ok(Box::new(self.build_float_instruction(
+                    location, builder, lhs_float, rhs_float,
+                )?))
+            }
+            _ => compiler_err!(location, "invalid operand type"),
+        }
+    }
+}
+
+impl BinaryOperation {
+    pub fn translate<'ctx, 'st>(
         &self,
         gen: &IRBuildContext<'ctx, 'st>,
         location: &Location,
         operand_type: &Type,
-        lhs: &dyn BasicValue<'ctx>,
-        rhs: &dyn BasicValue<'ctx>,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        if *self == BinaryOperation::Assign {
-            let lhs_ptr = lhs.to_ptr(*location)?;
+        match self {
+            BinaryOperation::Assignment(assignment) => {
+                let lhs_ptr = lhs.to_ptr(*location)?;
 
-            if operand_type.is_int_type() {
-                let rhs_int = rhs.to_int(*location)?;
+                let stored_val =
+                    assignment.get_stored_value(*location, gen, operand_type, lhs_ptr, rhs)?;
+
                 gen.builder
-                    .build_store(lhs_ptr, rhs_int)
+                    .build_store(lhs_ptr, stored_val.as_basic_value_enum())
                     .to_comp_res(*location)?;
-                return Ok(Box::new(lhs_ptr));
-            } else if operand_type.is_ptr_type() {
-                let rhs_ptr = rhs.to_ptr(*location)?;
-                gen.builder
-                    .build_store(lhs_ptr, rhs_ptr)
-                    .to_comp_res(*location)?;
-                return Ok(Box::new(lhs_ptr));
+
+                Ok(Box::new(lhs_ptr))
             }
-
-            compiler_err!(*location, "undefined operation");
-        }
-
-        if operand_type.is_int_type() {
-            let lhs_int = lhs.to_int(*location)?;
-            let rhs_int = rhs.to_int(*location)?;
-
-            match self {
-                BinaryOperation::Add => {
-                    return Ok(Box::new(
-                        gen.builder
-                            .build_int_add(lhs_int, rhs_int, "sum")
-                            .to_comp_res(*location)?,
-                    ));
-                }
-                BinaryOperation::Subtract => {
-                    return Ok(Box::new(
-                        gen.builder
-                            .build_int_sub(lhs_int, rhs_int, "sub")
-                            .to_comp_res(*location)?,
-                    ));
-                }
-                BinaryOperation::Divide => {
-                    return Ok(Box::new(
-                        gen.builder
-                            .build_int_signed_div(lhs_int, rhs_int, "div")
-                            .to_comp_res(*location)?,
-                    ));
-                }
-                BinaryOperation::Multiply => {
-                    return Ok(Box::new(
-                        gen.builder
-                            .build_int_mul(lhs_int, rhs_int, "mul")
-                            .to_comp_res(*location)?,
-                    ));
-                }
-                BinaryOperation::Modulo => {
-                    return Ok(Box::new(
-                        gen.builder
-                            .build_int_signed_rem(lhs_int, rhs_int, "mod")
-                            .to_comp_res(*location)?,
-                    ));
-                }
-                binary_op => {
-                    if let Some(predicate) = binary_op.to_llvm_int_predicate() {
-                        return Ok(Box::new(
-                            gen.builder
-                                .build_int_compare(predicate, lhs_int, rhs_int, "pred")
-                                .to_comp_res(*location)?,
-                        ));
-                    } else {
-                        compiler_err!(*location, "invalid operation");
-                    }
-                }
-            };
-        } else if operand_type.is_ptr_type() {
-            let lhs_ptr = lhs.to_ptr(*location)?;
-            let rhs_ptr = rhs.to_ptr(*location)?;
-
-            if let Some(predicate) = self.to_llvm_int_predicate() {
-                return Ok(Box::new(
-                    gen.builder
-                        .build_int_compare(predicate, lhs_ptr, rhs_ptr, "pred")
-                        .to_comp_res(*location)?,
-                ));
-            } else {
-                compiler_err!(*location, "invalid operation");
+            BinaryOperation::Math(op) => {
+                op.build_instruction(*location, &gen.builder, operand_type, lhs, rhs)
             }
+            BinaryOperation::Comparison(cmp) => match operand_type {
+                Type::Integer(is_signed, _) => {
+                    let pred = cmp.to_llvm_int_predicate(*is_signed);
+                    let lhs_int = lhs.to_int(*location)?;
+                    let rhs_int = rhs.to_int(*location)?;
+                    Ok(Box::new(
+                        gen.builder
+                            .build_int_compare(pred, lhs_int, rhs_int, "ipred")
+                            .to_comp_res(*location)?,
+                    ))
+                }
+                Type::FloatingPoint(_) => {
+                    let pred = cmp.to_llvm_float_predicate();
+                    let lhs_float = lhs.to_float(*location)?;
+                    let rhs_float = rhs.to_float(*location)?;
+                    Ok(Box::new(
+                        gen.builder
+                            .build_float_compare(pred, lhs_float, rhs_float, "fpred")
+                            .to_comp_res(*location)?,
+                    ))
+                }
+                Type::RawPtr | Type::TypedPtr(_) => {
+                    let pred = cmp.to_llvm_int_predicate(false);
+                    let lhs_ptr = lhs.to_ptr(*location)?;
+                    let rhs_ptr = rhs.to_ptr(*location)?;
+                    Ok(Box::new(
+                        gen.builder
+                            .build_int_compare(pred, lhs_ptr, rhs_ptr, "ipred")
+                            .to_comp_res(*location)?,
+                    ))
+                }
+                _ => compiler_err!(*location, "invalid operation"),
+            },
+            BinaryOperation::Logical(_) => compiler_err!(
+                *location,
+                "internal compiler error, this should be handled above"
+            ),
         }
-
-        compiler_err!(*location, "invalid type");
     }
 }
 
@@ -318,6 +438,20 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     "inttrunc",
                 )?))
             }
+        } else if target_type.is_float_type() {
+            let llvm_type = target_type
+                .to_llvm_basic_type(&self.ir_builder.context)
+                .to_comp_res_with_desc(location, "cannot cast float to basic type")?;
+            Ok(Box::new(
+                self.ir_builder
+                    .builder
+                    .build_signed_int_to_float(
+                        int_value,
+                        llvm_type.into_float_type(),
+                        "cased.float",
+                    )
+                    .to_comp_res(location)?,
+            ))
         } else {
             compiler_err!(location, "unsupported cast target type");
         }
@@ -370,53 +504,54 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         true_block: BasicBlock<'ctx>,
         false_block: BasicBlock<'ctx>,
     ) -> CompilerResult<()> {
-        match node.operation {
-            BinaryOperation::LogicalAnd => {
-                let and_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(*function, "and.pred");
-                self.translate_to_boolean(
-                    node.left.as_ref(),
-                    path,
-                    function,
-                    and_block,
-                    false_block,
-                )?;
-                self.ir_builder.builder.position_at_end(and_block);
-                self.translate_to_boolean(
-                    node.right.as_ref(),
-                    path,
-                    function,
-                    true_block,
-                    false_block,
-                )?;
+        if let BinaryOperation::Logical(operation) = node.operation {
+            match operation {
+                LogicalBinaryOperation::LogicalAnd => {
+                    let and_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(*function, "and.pred");
+                    self.translate_to_boolean(
+                        node.left.as_ref(),
+                        path,
+                        function,
+                        and_block,
+                        false_block,
+                    )?;
+                    self.ir_builder.builder.position_at_end(and_block);
+                    self.translate_to_boolean(
+                        node.right.as_ref(),
+                        path,
+                        function,
+                        true_block,
+                        false_block,
+                    )?;
+                }
+                LogicalBinaryOperation::LogicalOr => {
+                    let or_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(*function, "or.pred");
+                    self.translate_to_boolean(
+                        node.left.as_ref(),
+                        path,
+                        function,
+                        true_block,
+                        or_block,
+                    )?;
+                    self.ir_builder.builder.position_at_end(or_block);
+                    self.translate_to_boolean(
+                        node.right.as_ref(),
+                        path,
+                        function,
+                        true_block,
+                        false_block,
+                    )?;
+                }
             }
-            BinaryOperation::LogicalOr => {
-                let or_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(*function, "or.pred");
-                self.translate_to_boolean(
-                    node.left.as_ref(),
-                    path,
-                    function,
-                    true_block,
-                    or_block,
-                )?;
-                self.ir_builder.builder.position_at_end(or_block);
-                self.translate_to_boolean(
-                    node.right.as_ref(),
-                    path,
-                    function,
-                    true_block,
-                    false_block,
-                )?;
-            }
-            _ => {
-                self.build_boolean_branch(&node.into(), path, function, true_block, false_block)?;
-            }
-        };
+        } else {
+            self.build_boolean_branch(&node.into(), path, function, true_block, false_block)?;
+        }
 
         Ok(())
     }
@@ -838,21 +973,10 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 },
             )?;
 
-            if symbol.data_type.is_int_type() {
-                let int_value = value.as_ref().to_int(node.location)?;
-                self.ir_builder
-                    .builder
-                    .build_store(addr, int_value)
-                    .to_comp_res(node.location)?;
-            } else if symbol.data_type == Type::RawPtr {
-                let ptr_value = value.as_ref().to_ptr(node.location)?;
-                self.ir_builder
-                    .builder
-                    .build_store(addr, ptr_value)
-                    .to_comp_res(node.location)?;
-            } else {
-                compiler_err!(node.location, "unsupported variable type")
-            }
+            self.ir_builder
+                .builder
+                .build_store(addr, value.as_ref().as_basic_value_enum())
+                .to_comp_res(node.location)?;
         }
         Ok(())
     }
@@ -1182,186 +1306,187 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             );
         }
 
-        match node.operation {
-            BinaryOperation::LogicalAnd => {
-                let and_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(pd.function, "and.pred");
-                let end_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(pd.function, "end.pred");
+        if let BinaryOperation::Logical(logical_op) = node.operation {
+            match logical_op {
+                LogicalBinaryOperation::LogicalAnd => {
+                    let and_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(pd.function, "and.pred");
+                    let end_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(pd.function, "end.pred");
 
-                let left = self.translate_with_cast(
-                    node.left.as_ref(),
-                    &ExpressionPayload {
-                        path: pd.path.clone(),
-                        function: pd.function,
-                        expected_type: Type::Bool,
-                        value_type: ValueType::RValue,
-                    },
-                )?;
-                let left_int = left.as_ref().to_int(*node.get_location())?;
-                let left_block = self
-                    .ir_builder
-                    .builder
-                    .get_insert_block()
-                    .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.ir_builder
-                    .builder
-                    .build_conditional_branch(left_int, and_block, end_block)
-                    .to_comp_res(*node.get_location())?;
+                    let left = self.translate_with_cast(
+                        node.left.as_ref(),
+                        &ExpressionPayload {
+                            path: pd.path.clone(),
+                            function: pd.function,
+                            expected_type: Type::Bool,
+                            value_type: ValueType::RValue,
+                        },
+                    )?;
+                    let left_int = left.as_ref().to_int(*node.get_location())?;
+                    let left_block = self
+                        .ir_builder
+                        .builder
+                        .get_insert_block()
+                        .to_comp_res_with_desc(node.location, "invalid block")?;
+                    self.ir_builder
+                        .builder
+                        .build_conditional_branch(left_int, and_block, end_block)
+                        .to_comp_res(*node.get_location())?;
 
-                self.ir_builder.builder.position_at_end(and_block);
+                    self.ir_builder.builder.position_at_end(and_block);
 
-                let right = self.translate_with_cast(
-                    node.right.as_ref(),
-                    &ExpressionPayload {
-                        path: pd.path.clone(),
-                        function: pd.function,
-                        expected_type: Type::Bool,
-                        value_type: ValueType::RValue,
-                    },
-                )?;
+                    let right = self.translate_with_cast(
+                        node.right.as_ref(),
+                        &ExpressionPayload {
+                            path: pd.path.clone(),
+                            function: pd.function,
+                            expected_type: Type::Bool,
+                            value_type: ValueType::RValue,
+                        },
+                    )?;
 
-                let right_block = self
-                    .ir_builder
-                    .builder
-                    .get_insert_block()
-                    .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.ir_builder
-                    .builder
-                    .build_unconditional_branch(end_block)
-                    .to_comp_res(node.location)?;
+                    let right_block = self
+                        .ir_builder
+                        .builder
+                        .get_insert_block()
+                        .to_comp_res_with_desc(node.location, "invalid block")?;
+                    self.ir_builder
+                        .builder
+                        .build_unconditional_branch(end_block)
+                        .to_comp_res(node.location)?;
 
-                self.ir_builder.builder.position_at_end(end_block);
+                    self.ir_builder.builder.position_at_end(end_block);
 
-                let result = self
-                    .ir_builder
-                    .builder
-                    .build_phi(self.ir_builder.context.bool_type(), "and.result")
-                    .to_comp_res(node.location)?;
-                result.add_incoming(&[
-                    (
-                        &self.ir_builder.context.bool_type().const_zero(),
-                        left_block,
-                    ),
-                    (right.as_ref(), right_block),
-                ]);
+                    let result = self
+                        .ir_builder
+                        .builder
+                        .build_phi(self.ir_builder.context.bool_type(), "and.result")
+                        .to_comp_res(node.location)?;
+                    result.add_incoming(&[
+                        (
+                            &self.ir_builder.context.bool_type().const_zero(),
+                            left_block,
+                        ),
+                        (right.as_ref(), right_block),
+                    ]);
 
-                return Ok(Box::new(result.as_basic_value()));
+                    Ok(Box::new(result.as_basic_value()))
+                }
+                LogicalBinaryOperation::LogicalOr => {
+                    let or_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(pd.function, "or.pred");
+                    let end_block = self
+                        .ir_builder
+                        .context
+                        .append_basic_block(pd.function, "end.pred");
+
+                    let left = self.translate_with_cast(
+                        node.left.as_ref(),
+                        &ExpressionPayload {
+                            path: pd.path.clone(),
+                            function: pd.function,
+                            expected_type: Type::Bool,
+                            value_type: ValueType::RValue,
+                        },
+                    )?;
+
+                    let left_int = left.as_ref().to_int(*node.get_location())?;
+                    let left_block = self
+                        .ir_builder
+                        .builder
+                        .get_insert_block()
+                        .to_comp_res_with_desc(node.location, "invalid block")?;
+                    self.ir_builder
+                        .builder
+                        .build_conditional_branch(left_int, end_block, or_block)
+                        .to_comp_res(*node.get_location())?;
+
+                    self.ir_builder.builder.position_at_end(or_block);
+
+                    let right = self.translate_with_cast(
+                        node.right.as_ref(),
+                        &ExpressionPayload {
+                            path: pd.path.clone(),
+                            function: pd.function,
+                            expected_type: Type::Bool,
+                            value_type: ValueType::RValue,
+                        },
+                    )?;
+                    let right_block = self
+                        .ir_builder
+                        .builder
+                        .get_insert_block()
+                        .to_comp_res_with_desc(node.location, "invalid block")?;
+                    self.ir_builder
+                        .builder
+                        .build_unconditional_branch(end_block)
+                        .to_comp_res(node.location)?;
+
+                    self.ir_builder.builder.position_at_end(end_block);
+
+                    let result = self
+                        .ir_builder
+                        .builder
+                        .build_phi(self.ir_builder.context.bool_type(), "or.result")
+                        .to_comp_res(node.location)?;
+                    result.add_incoming(&[
+                        (
+                            &self.ir_builder.context.bool_type().const_int(1, false),
+                            left_block,
+                        ),
+                        (right.as_ref(), right_block),
+                    ]);
+
+                    Ok(Box::new(result.as_basic_value()))
+                }
             }
-            BinaryOperation::LogicalOr => {
-                let or_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(pd.function, "or.pred");
-                let end_block = self
-                    .ir_builder
-                    .context
-                    .append_basic_block(pd.function, "end.pred");
+        } else {
+            // For assigment we always expect the left hand side to be an l-value.
+            let left_value_type = node.get_left_value_type();
 
-                let left = self.translate_with_cast(
-                    node.left.as_ref(),
-                    &ExpressionPayload {
+            let (operand_type, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
+                .deduce_operand_and_out_type_for_binary_expression(
+                    node,
+                    &crate::ast_passes::type_deduction_pass::Payload {
                         path: pd.path.clone(),
-                        function: pd.function,
-                        expected_type: Type::Bool,
-                        value_type: ValueType::RValue,
+                        expected_type: pd.expected_type.clone(),
                     },
                 )?;
 
-                let left_int = left.as_ref().to_int(*node.get_location())?;
-                let left_block = self
-                    .ir_builder
-                    .builder
-                    .get_insert_block()
-                    .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.ir_builder
-                    .builder
-                    .build_conditional_branch(left_int, end_block, or_block)
-                    .to_comp_res(*node.get_location())?;
-
-                self.ir_builder.builder.position_at_end(or_block);
-
-                let right = self.translate_with_cast(
-                    node.right.as_ref(),
-                    &ExpressionPayload {
-                        path: pd.path.clone(),
-                        function: pd.function,
-                        expected_type: Type::Bool,
-                        value_type: ValueType::RValue,
-                    },
-                )?;
-                let right_block = self
-                    .ir_builder
-                    .builder
-                    .get_insert_block()
-                    .to_comp_res_with_desc(node.location, "invalid block")?;
-                self.ir_builder
-                    .builder
-                    .build_unconditional_branch(end_block)
-                    .to_comp_res(node.location)?;
-
-                self.ir_builder.builder.position_at_end(end_block);
-
-                let result = self
-                    .ir_builder
-                    .builder
-                    .build_phi(self.ir_builder.context.bool_type(), "or.result")
-                    .to_comp_res(node.location)?;
-                result.add_incoming(&[
-                    (
-                        &self.ir_builder.context.bool_type().const_int(1, false),
-                        left_block,
-                    ),
-                    (right.as_ref(), right_block),
-                ]);
-
-                return Ok(Box::new(result.as_basic_value()));
-            }
-            _ => {}
-        };
-
-        // For assigment we always expect the left hand side to be an l-value.
-        let left_value_type = node.get_left_value_type();
-
-        let (operand_type, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
-            .deduce_operand_and_out_type_for_binary_expression(
-                node,
-                &crate::ast_passes::type_deduction_pass::Payload {
+            let left = self.translate_with_cast(
+                node.left.as_ref(),
+                &ExpressionPayload {
                     path: pd.path.clone(),
-                    expected_type: pd.expected_type.clone(),
+                    function: pd.function,
+                    expected_type: operand_type.clone(),
+                    value_type: left_value_type,
+                },
+            )?;
+            let right = self.translate_with_cast(
+                node.right.as_ref(),
+                &ExpressionPayload {
+                    path: pd.path.clone(),
+                    function: pd.function,
+                    expected_type: operand_type.clone(),
+                    value_type: ValueType::RValue,
                 },
             )?;
 
-        let left = self.translate_with_cast(
-            node.left.as_ref(),
-            &ExpressionPayload {
-                path: pd.path.clone(),
-                function: pd.function,
-                expected_type: operand_type.clone(),
-                value_type: left_value_type,
-            },
-        )?;
-        let right = self.translate_with_cast(
-            node.right.as_ref(),
-            &ExpressionPayload {
-                path: pd.path.clone(),
-                function: pd.function,
-                expected_type: operand_type.clone(),
-                value_type: ValueType::RValue,
-            },
-        )?;
-
-        node.operation.build(
-            self.ir_builder,
-            &node.location,
-            &operand_type,
-            left.as_ref(),
-            right.as_ref(),
-        )
+            node.operation.translate(
+                self.ir_builder,
+                &node.location,
+                &operand_type,
+                left.as_ref().as_basic_value_enum(),
+                right.as_ref().as_basic_value_enum(),
+            )
+        }
     }
 
     fn visit_singular_expression(

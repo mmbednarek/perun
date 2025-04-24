@@ -31,7 +31,7 @@ impl<'st> TypeDeductionPass<'st> {
             },
         )?;
 
-        if node.operation == BinaryOperation::Assign {
+        if let BinaryOperation::Assignment(_) = node.operation {
             if left_deduced_type.is_void() {
                 Ok((right_deduced_type.clone(), right_deduced_type))
             } else {

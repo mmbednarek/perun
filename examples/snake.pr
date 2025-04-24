@@ -53,8 +53,8 @@ fn main() : i32 {
         segment.motion_x = 0;
         segment.motion_y = 0;
 
-        x = x + CELL_WIDTH;
-        index = index + 1;
+        x += CELL_WIDTH;
+        index += 1;
     }
 
     rect.w = CELL_WIDTH;
@@ -114,7 +114,7 @@ fn main() : i32 {
                 seg.motion_y = next_seg.motion_y;
             }
 
-            index = index + 1;
+            index += 1;
         }
 
         index = 0;
@@ -122,7 +122,7 @@ fn main() : i32 {
             ref seg = snake[index];
             seg.x = seg.x + seg.motion_x;
             seg.y = seg.y + seg.motion_y;
-            index = index + 1;
+            index += 1;
         }
 
         // Check if reached target AABB
@@ -135,7 +135,7 @@ fn main() : i32 {
 
             target_x = random::get_value(0, WINDOW_WIDTH-32);
             target_y = random::get_value(0, WINDOW_HEIGHT-32);
-            speed = speed + 1;
+            speed += 1;
 
             io::print("new apple position: ");
             io::print_int(target_x);
@@ -144,7 +144,7 @@ fn main() : i32 {
             io::print("\n");
 
             if head < 255 {
-                head = head + 1;
+                head += 1;
                 ref new_head_seg = snake[head];
                 new_head_seg.x = head_seg.x;
                 new_head_seg.y = head_seg.y;
@@ -163,7 +163,7 @@ fn main() : i32 {
             rect.x = seg.x;
             rect.y = seg.y;
             renderer.fill_rect(&rect);
-            index = index + 1;
+            index += 1;
         }
 
         renderer.set_draw_color(0, 255, 0, 255);

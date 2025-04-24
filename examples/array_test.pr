@@ -1,7 +1,6 @@
 
-fn main(): i32 {
-    var values: *i64;
-    var value = *values;
-
-    return value;
+fn main() : i32 {
+    var value: i32 = 5;
+    var other_val: i32 = 10 / value + 1;
+    return other_val;
 }

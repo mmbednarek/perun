@@ -11,13 +11,14 @@ use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::targets::{FileType, RelocMode, Target, TargetMachine, TargetMachineOptions};
 use inkwell::types::AnyTypeEnum;
-use inkwell::values::{BasicValue, BasicValueEnum, IntValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FloatValue, IntValue, PointerValue};
 use inkwell::OptimizationLevel;
 
 type MainFunc = unsafe extern "C" fn() -> i32;
 
 pub trait BasicValueExtension<'ctx> {
     fn to_int(&self, location: Location) -> CompilerResult<IntValue<'ctx>>;
+    fn to_float(&self, location: Location) -> CompilerResult<FloatValue<'ctx>>;
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>>;
     #[allow(dead_code)]
     fn is_ptr(&self) -> bool;
@@ -31,6 +32,18 @@ impl<'ctx> BasicValueExtension<'ctx> for dyn BasicValue<'ctx> + '_ {
             compiler_err!(
                 location,
                 "invalid type, value {} is not int",
+                self.print_to_string()
+            );
+        }
+    }
+
+    fn to_float(&self, location: Location) -> CompilerResult<FloatValue<'ctx>> {
+        if let BasicValueEnum::FloatValue(float_val) = self.as_basic_value_enum() {
+            Ok(float_val)
+        } else {
+            compiler_err!(
+                location,
+                "invalid type, value {} is not float",
                 self.print_to_string()
             );
         }
@@ -59,6 +72,10 @@ impl<'ctx> BasicValueExtension<'ctx> for dyn BasicValue<'ctx> + '_ {
 impl<'ctx> BasicValueExtension<'ctx> for BasicValueEnum<'ctx> {
     fn to_int(&self, location: Location) -> CompilerResult<IntValue<'ctx>> {
         (self as &dyn BasicValue<'ctx>).to_int(location)
+    }
+
+    fn to_float(&self, location: Location) -> CompilerResult<FloatValue<'ctx>> {
+        (self as &dyn BasicValue<'ctx>).to_float(location)
     }
 
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>> {

@@ -34,6 +34,11 @@ pub enum OperatorType {
     Or,
     LogicalOr,
     LogicalAnd,
+    Increase,
+    Decrease,
+    MultiplyAssign,
+    DivideAssign,
+    ModuloAssign,
 }
 
 impl OperatorType {
@@ -73,6 +78,11 @@ impl OperatorType {
             OperatorType::Ampersand => true,
             OperatorType::Or => true,
             OperatorType::Colon => true,
+            OperatorType::Plus => true,
+            OperatorType::Minus => true,
+            OperatorType::Asterisk => true,
+            OperatorType::Slash => true,
+            OperatorType::Percent => true,
             _ => false,
         }
     }
@@ -105,6 +115,26 @@ impl OperatorType {
             },
             OperatorType::Colon => match other {
                 OperatorType::Colon => Some(OperatorType::DoubleColon),
+                _ => None,
+            },
+            OperatorType::Plus => match other {
+                OperatorType::Equals => Some(OperatorType::Increase),
+                _ => None,
+            },
+            OperatorType::Minus => match other {
+                OperatorType::Equals => Some(OperatorType::Decrease),
+                _ => None,
+            },
+            OperatorType::Asterisk => match other {
+                OperatorType::Equals => Some(OperatorType::MultiplyAssign),
+                _ => None,
+            },
+            OperatorType::Slash => match other {
+                OperatorType::Equals => Some(OperatorType::DivideAssign),
+                _ => None,
+            },
+            OperatorType::Percent => match other {
+                OperatorType::Equals => Some(OperatorType::ModuloAssign),
                 _ => None,
             },
             _ => None,
