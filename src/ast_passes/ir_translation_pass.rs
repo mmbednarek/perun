@@ -404,56 +404,129 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             return Ok(value);
         }
 
-        if !source_type.is_int_type() {
-            compiler_err!(location, "source cast must be an int");
-        }
+        let source_llvm_type = source_type
+            .to_llvm_basic_type(&self.ir_builder.context)
+            .to_comp_res_with_desc(location, "invalid source type")?;
 
-        let int_value = value.as_ref().to_int(location)?;
+        let target_llvm_type = target_type
+            .to_llvm_basic_type(&self.ir_builder.context)
+            .to_comp_res_with_desc(location, "invalid target type")?;
 
-        if target_type.is_bool_type() {
-            Ok(Box::new(
-                self.ir_builder
-                    .builder
-                    .build_int_compare(
-                        IntPredicate::NE,
-                        int_value,
-                        self.ir_builder.context.i32_type().const_int(0, true),
-                        "tobool",
-                    )
-                    .to_comp_res(location)?,
-            ))
-        } else if target_type.is_int_type() {
-            if target_type.byte_count() > source_type.byte_count() {
-                Ok(Box::new(self.ir_builder.build_sext(
-                    location,
-                    target_type,
-                    int_value,
-                    "intsext",
-                )?))
-            } else {
-                Ok(Box::new(self.ir_builder.build_trunc(
-                    location,
-                    target_type,
-                    int_value,
-                    "inttrunc",
-                )?))
+        match source_type {
+            Type::Integer(src_is_signed, src_data_size) => {
+                let value_int = value.to_int(location)?;
+                match target_type {
+                    Type::Integer(_, dst_data_size) => {
+                        if dst_data_size.bit_count() > src_data_size.bit_count() {
+                            Ok(Box::new(
+                                if *src_is_signed {
+                                    self.ir_builder.builder.build_int_s_extend(
+                                        value_int,
+                                        target_llvm_type.into_int_type(),
+                                        "sextended",
+                                    )
+                                } else {
+                                    self.ir_builder.builder.build_int_z_extend(
+                                        value_int,
+                                        target_llvm_type.into_int_type(),
+                                        "zextended",
+                                    )
+                                }
+                                .to_comp_res(location)?,
+                            ))
+                        } else if dst_data_size.bit_count() < src_data_size.bit_count() {
+                            Ok(Box::new(
+                                self.ir_builder
+                                    .builder
+                                    .build_int_truncate(
+                                        value_int,
+                                        target_llvm_type.into_int_type(),
+                                        "trunced",
+                                    )
+                                    .to_comp_res(location)?,
+                            ))
+                        } else {
+                            Ok(value)
+                        }
+                    }
+                    Type::FloatingPoint(_) => Ok(Box::new(
+                        if *src_is_signed {
+                            self.ir_builder.builder.build_signed_int_to_float(
+                                value_int,
+                                target_llvm_type.into_float_type(),
+                                "fscast",
+                            )
+                        } else {
+                            self.ir_builder.builder.build_unsigned_int_to_float(
+                                value_int,
+                                target_llvm_type.into_float_type(),
+                                "fucast",
+                            )
+                        }
+                        .to_comp_res(location)?,
+                    )),
+                    Type::Bool => Ok(Box::new(
+                        self.ir_builder
+                            .builder
+                            .build_int_compare(
+                                IntPredicate::NE,
+                                value_int,
+                                source_llvm_type.into_int_type().const_int(0, false),
+                                "intcmp",
+                            )
+                            .to_comp_res(location)?,
+                    )),
+                    _ => compiler_err!(location, "invalid cast target type"),
+                }
             }
-        } else if target_type.is_float_type() {
-            let llvm_type = target_type
-                .to_llvm_basic_type(&self.ir_builder.context)
-                .to_comp_res_with_desc(location, "cannot cast float to basic type")?;
-            Ok(Box::new(
-                self.ir_builder
-                    .builder
-                    .build_signed_int_to_float(
-                        int_value,
-                        llvm_type.into_float_type(),
-                        "cased.float",
-                    )
-                    .to_comp_res(location)?,
-            ))
-        } else {
-            compiler_err!(location, "unsupported cast target type");
+            Type::FloatingPoint(src_data_size) => {
+                let value_float = value.to_float(location)?;
+                match target_type {
+                    Type::Integer(dst_is_signed, _) => Ok(Box::new(
+                        if *dst_is_signed {
+                            self.ir_builder.builder.build_float_to_signed_int(
+                                value_float,
+                                target_llvm_type.into_int_type(),
+                                "icast",
+                            )
+                        } else {
+                            self.ir_builder.builder.build_float_to_unsigned_int(
+                                value_float,
+                                target_llvm_type.into_int_type(),
+                                "ucast",
+                            )
+                        }
+                        .to_comp_res(location)?,
+                    )),
+                    Type::FloatingPoint(dst_data_size) => {
+                        if dst_data_size.bit_count() > src_data_size.bit_count() {
+                            Ok(Box::new(
+                                self.ir_builder
+                                    .builder
+                                    .build_float_ext(
+                                        value_float,
+                                        target_llvm_type.into_float_type(),
+                                        "floatext",
+                                    )
+                                    .to_comp_res(location)?,
+                            ))
+                        } else {
+                            Ok(Box::new(
+                                self.ir_builder
+                                    .builder
+                                    .build_float_trunc(
+                                        value_float,
+                                        target_llvm_type.into_float_type(),
+                                        "floattrunc",
+                                    )
+                                    .to_comp_res(location)?,
+                            ))
+                        }
+                    }
+                    _ => compiler_err!(location, "invalid cast target type"),
+                }
+            }
+            _ => compiler_err!(location, "invalid cast source type"),
         }
     }
 
@@ -1238,6 +1311,15 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         Ok(self.ir_builder.null_ptr())
     }
 
+    fn visit_boolean(
+        &self,
+        node: &BooleanNode,
+        pd: &ExpressionPayload,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        assert_eq!(pd.value_type, ValueType::RValue);
+        self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
+    }
+
     fn visit_self(
         &self,
         node: &SelfNode,
@@ -1264,6 +1346,15 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &NumberNode,
         pd: &ExpressionPayload,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
+        assert_eq!(pd.value_type, ValueType::RValue);
+        self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
+    }
+
+    fn visit_floating_point(
+        &self,
+        node: &FloatingPointNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult {
         assert_eq!(pd.value_type, ValueType::RValue);
         self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
     }

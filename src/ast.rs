@@ -613,6 +613,24 @@ impl Into<AnyExpressionNode> for &NullNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct BooleanNode {
+    pub location: Location,
+    pub value: bool,
+}
+
+impl LocatedNode for BooleanNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &BooleanNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Boolean(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SelfNode {
     pub location: Location,
 }
@@ -644,6 +662,24 @@ impl LocatedNode for NumberNode {
 impl Into<AnyExpressionNode> for &NumberNode {
     fn into(self) -> AnyExpressionNode {
         AnyExpressionNode::Number(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FloatingPointNode {
+    pub location: Location,
+    pub value: f64,
+}
+
+impl LocatedNode for FloatingPointNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &FloatingPointNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::FloatingPoint(self.clone())
     }
 }
 
@@ -856,8 +892,10 @@ impl Into<AnyExpressionNode> for &MethodCall {
 pub enum AnyExpressionNode {
     Identifier(IdentifierNode),
     Null(NullNode),
+    Boolean(BooleanNode),
     SelfN(SelfNode),
     Number(NumberNode),
+    FloatingPoint(FloatingPointNode),
     String(StringNode),
     BinaryExpression(BinaryExpressionNode),
     SingularExpression(SingularExpressionNode),
@@ -873,8 +911,10 @@ impl LocatedNode for AnyExpressionNode {
         match self {
             AnyExpressionNode::Identifier(node) => node.get_location(),
             AnyExpressionNode::Null(node) => node.get_location(),
+            AnyExpressionNode::Boolean(node) => node.get_location(),
             AnyExpressionNode::SelfN(node) => node.get_location(),
             AnyExpressionNode::Number(node) => node.get_location(),
+            AnyExpressionNode::FloatingPoint(node) => node.get_location(),
             AnyExpressionNode::String(node) => node.get_location(),
             AnyExpressionNode::BinaryExpression(node) => node.get_location(),
             AnyExpressionNode::SingularExpression(node) => node.get_location(),
@@ -893,8 +933,14 @@ pub trait ExpressionVisitor {
 
     fn visit_identifier(&self, node: &IdentifierNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_null(&self, node: &NullNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_boolean(&self, node: &BooleanNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_self(&self, node: &SelfNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_number(&self, node: &NumberNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_floating_point(
+        &self,
+        node: &FloatingPointNode,
+        pd: &Self::Payload,
+    ) -> Self::VisitResult;
     fn visit_string(&self, node: &StringNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_binary_expression(
         &self,
@@ -920,8 +966,10 @@ pub trait ExpressionVisitor {
         match any_expression {
             AnyExpressionNode::Identifier(node) => self.visit_identifier(node, pd),
             AnyExpressionNode::Null(node) => self.visit_null(node, pd),
+            AnyExpressionNode::Boolean(node) => self.visit_boolean(node, pd),
             AnyExpressionNode::SelfN(node) => self.visit_self(node, pd),
             AnyExpressionNode::Number(node) => self.visit_number(node, pd),
+            AnyExpressionNode::FloatingPoint(node) => self.visit_floating_point(node, pd),
             AnyExpressionNode::String(node) => self.visit_string(node, pd),
             AnyExpressionNode::BinaryExpression(node) => self.visit_binary_expression(node, pd),
             AnyExpressionNode::SingularExpression(node) => self.visit_singular_expression(node, pd),

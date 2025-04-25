@@ -171,6 +171,8 @@ pub enum Keyword {
     SelfKw,
     Import,
     Public,
+    True,
+    False,
 }
 
 impl Keyword {
@@ -203,21 +205,24 @@ impl Keyword {
             "self" => Some(Keyword::SelfKw),
             "import" => Some(Keyword::Import),
             "pub" => Some(Keyword::Public),
+            "true" => Some(Keyword::True),
+            "false" => Some(Keyword::False),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
     Identifier(String),
     Number(u64),
+    FloatingPoint(f64),
     Operator(OperatorType),
     Keyword(Keyword),
     String(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub token_type: TokenType,
     pub location: Location,

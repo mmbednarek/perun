@@ -2,16 +2,6 @@ use crate::token::{Keyword, Location, OperatorType, Token, TokenType};
 use std::io::Read;
 use std::mem::take;
 
-fn is_wide_space(ch: char) -> bool {
-    match ch {
-        ' ' => true,
-        '\t' => true,
-        '\r' => true,
-        '\n' => true,
-        _ => false,
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum LexState {
     Global,
@@ -26,6 +16,8 @@ pub struct Lexer<'src> {
     reader: Box<dyn Read + 'src>,
     out_tokens: Vec<Token>,
     current_token: String,
+    is_current_token_numeric: bool,
+    is_current_token_floating_point: bool,
     state: LexState,
     pending_op: Option<OperatorType>,
     token_start: Location,
@@ -38,6 +30,8 @@ impl<'src> Lexer<'src> {
             reader,
             out_tokens: Vec::new(),
             current_token: String::new(),
+            is_current_token_numeric: true,
+            is_current_token_floating_point: false,
             state: LexState::Global,
             pending_op: None,
             token_start: Location { line: 1, column: 1 },
@@ -65,29 +59,45 @@ impl<'src> Lexer<'src> {
         Ok(ch_buff[0])
     }
 
+    fn reset_current_identifier(&mut self) {
+        self.current_token.clear();
+        self.is_current_token_numeric = true;
+        self.is_current_token_floating_point = false;
+    }
+
     fn handle_identifier(&mut self) {
         if self.current_token.is_empty() {
             self.token_start = self.current_location;
+            self.reset_current_identifier();
             return;
+        }
+
+        if self.is_current_token_numeric {
+            if self.is_current_token_floating_point {
+                if let Ok(num) = self.current_token.parse::<f64>() {
+                    self.push_token(TokenType::FloatingPoint(num));
+                    self.reset_current_identifier();
+                    return;
+                }
+            } else {
+                if let Ok(num) = self.current_token.parse::<u64>() {
+                    self.push_token(TokenType::Number(num));
+                    self.reset_current_identifier();
+                    return;
+                }
+            }
         }
 
         // Check if it's a keyword
         if let Some(kw) = Keyword::from_string(self.current_token.as_ref()) {
             self.push_token(TokenType::Keyword(kw));
-            self.current_token.clear();
-            return;
-        }
-
-        // Try to parse it as integer.
-        let ident_int = self.current_token.parse::<u64>();
-        if let Ok(num) = ident_int {
-            self.push_token(TokenType::Number(num));
-            self.current_token.clear();
+            self.reset_current_identifier();
             return;
         }
 
         let identifier_tkn = TokenType::Identifier(take(&mut self.current_token));
         self.push_token(identifier_tkn);
+        self.reset_current_identifier();
     }
 
     fn handle_char(&mut self, ch: char) {
@@ -142,7 +152,7 @@ impl<'src> Lexer<'src> {
                 self.state = LexState::String;
             }
             LexState::Global => {
-                if is_wide_space(ch) {
+                if ch.is_whitespace() {
                     self.handle_identifier();
                     return;
                 }
@@ -159,6 +169,12 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
+                if self.is_current_token_numeric && ch == '.' {
+                    self.current_token.push('.');
+                    self.is_current_token_floating_point = true;
+                    return;
+                }
+
                 if let Some(op) = OperatorType::from_char(ch) {
                     self.handle_identifier();
                     if op.has_continuation() {
@@ -170,6 +186,9 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
+                if !ch.is_numeric() && ch != '.' {
+                    self.is_current_token_numeric = false;
+                }
                 self.current_token.push(ch);
             }
             LexState::ReadOperator => {

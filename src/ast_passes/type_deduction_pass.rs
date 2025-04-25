@@ -85,6 +85,10 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
         Ok(Type::RawPtr)
     }
 
+    fn visit_boolean(&self, _: &BooleanNode, _: &Payload) -> CompilerResult<Type> {
+        Ok(Type::Bool)
+    }
+
     fn visit_self(&self, node: &SelfNode, pd: &Payload) -> CompilerResult<Type> {
         let sym = self
             .symbol_table
@@ -103,6 +107,14 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
                 Ok(Type::Integer(true, DataSize::Bits64))
             }
         }
+    }
+
+    fn visit_floating_point(
+        &self,
+        _: &FloatingPointNode,
+        _: &Self::Payload,
+    ) -> CompilerResult<Type> {
+        Ok(Type::FloatingPoint(DataSize::Bits64))
     }
 
     fn visit_string(&self, _: &StringNode, _: &Payload) -> CompilerResult<Type> {

@@ -720,6 +720,13 @@ where
                             .into(),
                     );
                 }
+                TokenType::FloatingPoint(num) => builder.push_expr(
+                    (&FloatingPointNode {
+                        location: token.location,
+                        value: *num,
+                    })
+                        .into(),
+                ),
                 TokenType::Identifier(value) => {
                     self.parse_identifier_continuation(
                         &mut builder,
@@ -757,6 +764,24 @@ where
                         builder.push_expr(
                             (&NullNode {
                                 location: token.location,
+                            })
+                                .into(),
+                        );
+                    }
+                    Keyword::True => {
+                        builder.push_expr(
+                            (&BooleanNode {
+                                location: token.location,
+                                value: true,
+                            })
+                                .into(),
+                        );
+                    }
+                    Keyword::False => {
+                        builder.push_expr(
+                            (&BooleanNode {
+                                location: token.location,
+                                value: false,
                             })
                                 .into(),
                         );

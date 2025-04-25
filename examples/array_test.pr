@@ -1,6 +1,6 @@
 
 fn main() : i32 {
-    var value: i32 = 5;
-    var other_val: i32 = 10 / value + 1;
+    var value = 3.5 + 1.2;
+    var other_val = value * 0.5 + 1.5;
     return other_val;
 }

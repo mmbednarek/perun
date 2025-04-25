@@ -32,7 +32,7 @@ fn main() : i32 {
     );
 
     var event_ptr = mem::allocate(56);
-    var is_running: bool = 1;
+    var is_running = true;
 
     var renderer: sdl::Renderer;
     renderer.init(wnd, -1, 2);
@@ -65,7 +65,7 @@ fn main() : i32 {
             ref event_type: i32 = *event_ptr;
 
             if event_type == sdl::EVENT_QUIT {
-                is_running = 0;
+                is_running = false;
             }
             if event_type == sdl::EVENT_KEYDOWN {
                 ref kb_event: sdl::KeyboardEvent = *event_ptr;
