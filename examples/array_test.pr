@@ -10,17 +10,18 @@ enum Weekday {
     Sunday,
 }
 
-fn print_weekday(wd: Weekday) {
-    var strings: rawptr[7];
-    strings[Weekday::Monday] = "Monday";
-    strings[Weekday::Tuesday] = "Tuesday";
-    strings[Weekday::Wednesday] = "Wednesday";
-    strings[Weekday::Thursday] = "Thursday";
-    strings[Weekday::Friday] = "Friday";
-    strings[Weekday::Saturday] = "Saturday";
-    strings[Weekday::Sunday] = "Sunday";
+const weekday_strings: rawptr[7] = {
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+};
 
-    io::print(strings[wd]);
+fn print_weekday(wd: Weekday) {
+    io::print(weekday_strings[wd]);
 }
 
 fn main() : i32 {

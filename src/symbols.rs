@@ -210,7 +210,9 @@ impl SymbolTable {
     ) -> SymbolLookupResult<SymbolPath> {
         Ok(if let Some(ns) = &identifier.namespace {
             let (namespace_sym, sym_path) = self.find_symbol_with_path(path, ns)?;
-            if namespace_sym.sym_type != SymbolType::Namespace && namespace_sym.sym_type != SymbolType::TypeDef {
+            if namespace_sym.sym_type != SymbolType::Namespace
+                && namespace_sym.sym_type != SymbolType::TypeDef
+            {
                 return Err(SymbolLookupError::NotANamespace);
             }
             sym_path.sub(namespace_sym.name.as_ref())

@@ -1333,7 +1333,23 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                     .ir_value_storage
                     .find_basic_value(&path, &node.name.value)
                     .to_comp_res_with_desc(node.location, "unable to find value")?;
-                Ok(Box::new(basic_val.as_basic_value_enum()))
+
+                if pd.value_type == ValueType::LValue {
+                    let llvm_type = symbol
+                        .data_type
+                        .to_llvm_basic_type(self.ir_builder.context)
+                        .to_comp_res_with_desc(node.location, "cannot map type")?;
+                    let global_val = self.ir_builder.module.add_global(
+                        llvm_type,
+                        Some(AddressSpace::from(0)),
+                        &node.name.value,
+                    );
+                    global_val.set_constant(true);
+                    global_val.set_initializer(basic_val);
+                    Ok(Box::new(global_val))
+                } else {
+                    Ok(Box::new(basic_val.as_basic_value_enum()))
+                }
             }
             _ => {
                 compiler_err!(node.location, "TODO: Implement")
@@ -1405,22 +1421,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         if pd.value_type == ValueType::LValue {
             compiler_err!(node.location, "tried to interpret a string as an l-value");
         }
-
-        let arr = self
-            .ir_builder
-            .context
-            .i8_type()
-            .array_type(node.value.len() as u32);
-        let global_val = self.ir_builder.module.add_global(arr, None, "str");
-        global_val.set_constant(true);
-
-        let str_val = self
-            .ir_builder
-            .context
-            .const_string(node.value.as_bytes(), true);
-        global_val.set_initializer(&str_val);
-
-        Ok(Box::new(global_val.as_pointer_value()))
+        self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
     }
 
     fn visit_binary_expression(
@@ -1780,11 +1781,19 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         let obj_type = self.deduce_type(pd.path.clone(), Type::Void, node.object.as_ref())?;
-        let value_type = if obj_type.is_ptr_type() {
-            ValueType::RValue
+
+        let ct_index: Option<u64> = if let AnyExpressionNode::Number(num) = node.index.as_ref() {
+            Some(num.number)
         } else {
-            ValueType::LValue
+            None
         };
+
+        let value_type =
+            if obj_type.is_ptr_type() || (ct_index.is_some() && obj_type.is_static_array()) {
+                ValueType::RValue
+            } else {
+                ValueType::LValue
+            };
 
         let obj_value = self.visit_expression(
             node.object.as_ref(),
@@ -1795,7 +1804,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 value_type,
             },
         )?;
-        let obj_ptr = obj_value.as_ref().to_ptr(node.location)?;
+
         let index_type = self.deduce_type(
             pd.path.clone(),
             Type::Integer(false, DataSize::Bits32),
@@ -1812,10 +1821,28 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
         let index = index_value.as_ref().to_int(node.location)?;
 
-        let element_type = match obj_type {
+        let element_type = match &obj_type {
             Type::StaticArray(sub_type, _) => sub_type.as_ref().clone(),
+            Type::TypedPtr(sub_type) => sub_type.as_ref().clone(),
             _ => pd.expected_type.clone(),
         };
+
+        if let Some(index) = ct_index {
+            if pd.value_type == ValueType::RValue && obj_type.is_static_array() {
+                return Ok(Box::new(
+                    self.ir_builder
+                        .builder
+                        .build_extract_value(
+                            obj_value.as_ref().to_array(node.location)?,
+                            index as u32,
+                            "extractedval",
+                        )
+                        .to_comp_res(node.location)?,
+                ));
+            }
+        }
+
+        let obj_ptr = obj_value.as_ref().to_ptr(node.location)?;
 
         let indexed_ptr = self.build_get_element_ptr(
             node.location,
@@ -1994,5 +2021,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         } else {
             compiler_err!(node.location, "invalid function type")
         }
+    }
+
+    fn visit_constructor(&self, node: &ConstructorNode, pd: &Self::Payload) -> Self::VisitResult {
+        assert_eq!(pd.value_type, ValueType::RValue);
+        self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
     }
 }

@@ -198,7 +198,8 @@ where
                         result.body.push(import_node);
                     }
                     Keyword::Enum => {
-                        let enum_node: GlobalStatementBox = Box::new((&self.parse_enum(location, is_public)?).into());
+                        let enum_node: GlobalStatementBox =
+                            Box::new((&self.parse_enum(location, is_public)?).into());
                         result.body.push(enum_node);
                     }
                     Keyword::Public => {
@@ -575,7 +576,8 @@ where
     }
 
     pub fn parse_expression(&mut self, stop_op: OperatorType) -> CompilerResult<ExpressionBox> {
-        self.parse_expression_until_one_of(&[stop_op])
+        let (expr, _) = self.parse_expression_until_one_of(&[stop_op])?;
+        Ok(expr)
     }
 
     fn parse_member_expression(
@@ -693,7 +695,7 @@ where
     fn parse_expression_until_one_of(
         &mut self,
         stop_ops: &[OperatorType],
-    ) -> CompilerResult<ExpressionBox> {
+    ) -> CompilerResult<(ExpressionBox, OperatorType)> {
         let peek = self.reader.peek();
         let token_start_loc = match peek {
             Ok(tkn) => tkn.location,
@@ -701,6 +703,7 @@ where
         };
 
         let mut builder = ExpressionBuilder::new(token_start_loc.clone());
+        let finish_operand: OperatorType;
 
         loop {
             let token = self.reader.next()?.clone();
@@ -708,9 +711,13 @@ where
             match &token.token_type {
                 TokenType::Operator(op_type) => {
                     if stop_ops.iter().any(|op| *op_type == *op) {
+                        finish_operand = *op_type;
                         break;
                     } else if *op_type == OperatorType::LeftParen {
                         builder.push_expr_box(self.parse_expression(OperatorType::RightParen)?);
+                    } else if *op_type == OperatorType::LeftBrace {
+                        let constructor = self.parse_constructor(token.location)?;
+                        builder.push_expr_box(Box::new((&constructor).into()))
                     } else {
                         builder.push_op(op_type)?;
                     }
@@ -821,7 +828,7 @@ where
             }
         }
 
-        builder.build()
+        Ok((builder.build()?, finish_operand))
     }
 
     fn parse_function_call(
@@ -842,14 +849,10 @@ where
         }
 
         loop {
-            let expr = self
+            let (expr, op) = self
                 .parse_expression_until_one_of(&[OperatorType::Comma, OperatorType::RightParen])?;
             args.push(expr);
-
-            self.reader.seek_back();
-
-            let expr_term = self.reader.next()?;
-            if expr_term.token_type == TokenType::Operator(OperatorType::RightParen) {
+            if op == OperatorType::RightParen {
                 break;
             }
         }
@@ -940,30 +943,64 @@ where
     fn parse_enum(&mut self, location: Location, is_public: bool) -> CompilerResult<EnumNode> {
         let name = self.reader.expect_identifier()?;
 
-        self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
 
         let mut enumerations: Vec<String> = Vec::new();
 
         loop {
-            if self.reader.skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))? {
+            if self
+                .reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))?
+            {
                 break;
             }
 
             let enumeration_tkn = self.reader.expect_identifier()?;
             enumerations.push(enumeration_tkn);
 
-            if self.reader.skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))? {
+            if self
+                .reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))?
+            {
                 break;
             }
 
-            self.reader.expect_token(TokenType::Operator(OperatorType::Comma))?;
+            self.reader
+                .expect_token(TokenType::Operator(OperatorType::Comma))?;
         }
 
-        Ok(EnumNode{
+        Ok(EnumNode {
             location,
             name,
             enumerations,
             is_public,
         })
+    }
+
+    fn parse_constructor(&mut self, location: Location) -> CompilerResult<ConstructorNode> {
+        let mut node = ConstructorNode {
+            location,
+            arguments: Vec::new(),
+        };
+
+        loop {
+            if self
+                .reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))?
+            {
+                break;
+            }
+
+            let (expr, op) = self
+                .parse_expression_until_one_of(&[OperatorType::Comma, OperatorType::RightBrace])?;
+            node.arguments.push(expr);
+
+            if op == OperatorType::RightBrace {
+                break;
+            }
+        }
+
+        Ok(node)
     }
 }

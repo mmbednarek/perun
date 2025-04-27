@@ -361,7 +361,6 @@ impl Into<AnyGlobalStatement> for &EnumNode {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ImportNode {
     pub location: Location,
@@ -913,6 +912,24 @@ impl Into<AnyExpressionNode> for &MethodCall {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConstructorNode {
+    pub location: Location,
+    pub arguments: Vec<ExpressionBox>,
+}
+
+impl LocatedNode for ConstructorNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyExpressionNode> for &ConstructorNode {
+    fn into(self) -> AnyExpressionNode {
+        AnyExpressionNode::Constructor(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum AnyExpressionNode {
     Identifier(IdentifierNode),
     Null(NullNode),
@@ -928,6 +945,7 @@ pub enum AnyExpressionNode {
     GetField(GetFieldNode),
     Cast(CastNode),
     MethodCall(MethodCall),
+    Constructor(ConstructorNode),
 }
 
 impl LocatedNode for AnyExpressionNode {
@@ -947,6 +965,7 @@ impl LocatedNode for AnyExpressionNode {
             AnyExpressionNode::GetField(node) => node.get_location(),
             AnyExpressionNode::Cast(node) => node.get_location(),
             AnyExpressionNode::MethodCall(node) => node.get_location(),
+            AnyExpressionNode::Constructor(node) => node.get_location(),
         }
     }
 }
@@ -981,6 +1000,7 @@ pub trait ExpressionVisitor {
     fn visit_get_field(&self, node: &GetFieldNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_cast(&self, node: &CastNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_method_call(&self, node: &MethodCall, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_constructor(&self, node: &ConstructorNode, pd: &Self::Payload) -> Self::VisitResult;
 
     fn visit_expression(
         &self,
@@ -1002,6 +1022,7 @@ pub trait ExpressionVisitor {
             AnyExpressionNode::GetField(node) => self.visit_get_field(node, pd),
             AnyExpressionNode::Cast(node) => self.visit_cast(node, pd),
             AnyExpressionNode::MethodCall(node) => self.visit_method_call(node, pd),
+            AnyExpressionNode::Constructor(node) => self.visit_constructor(node, pd),
         }
     }
 }

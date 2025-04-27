@@ -208,6 +208,10 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
             compiler_err!(node.location, "invalid receiver type")
         }
     }
+
+    fn visit_constructor(&self, _: &ConstructorNode, pd: &Self::Payload) -> Self::VisitResult {
+        Ok(pd.expected_type.clone())
+    }
 }
 
 pub fn deduce_type(

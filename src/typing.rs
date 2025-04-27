@@ -176,6 +176,13 @@ impl Type {
         }
     }
 
+    pub fn is_static_array(&self) -> bool {
+        match self {
+            Type::StaticArray(_, _) => true,
+            _ => false,
+        }
+    }
+
     pub fn is_bool_type(&self) -> bool {
         match self {
             Type::Bool => true,

@@ -11,7 +11,7 @@ use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::targets::{FileType, RelocMode, Target, TargetMachine, TargetMachineOptions};
 use inkwell::types::AnyTypeEnum;
-use inkwell::values::{BasicValue, BasicValueEnum, FloatValue, IntValue, PointerValue};
+use inkwell::values::{ArrayValue, BasicValue, BasicValueEnum, FloatValue, IntValue, PointerValue};
 use inkwell::OptimizationLevel;
 
 type MainFunc = unsafe extern "C" fn() -> i32;
@@ -20,6 +20,7 @@ pub trait BasicValueExtension<'ctx> {
     fn to_int(&self, location: Location) -> CompilerResult<IntValue<'ctx>>;
     fn to_float(&self, location: Location) -> CompilerResult<FloatValue<'ctx>>;
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>>;
+    fn to_array(&self, location: Location) -> CompilerResult<ArrayValue<'ctx>>;
     #[allow(dead_code)]
     fn is_ptr(&self) -> bool;
 }
@@ -61,6 +62,18 @@ impl<'ctx> BasicValueExtension<'ctx> for dyn BasicValue<'ctx> + '_ {
         }
     }
 
+    fn to_array(&self, location: Location) -> CompilerResult<ArrayValue<'ctx>> {
+        if let BasicValueEnum::ArrayValue(array_val) = self.as_basic_value_enum() {
+            Ok(array_val)
+        } else {
+            compiler_err!(
+                location,
+                "invalid type, value {} is not ptr",
+                self.print_to_string()
+            );
+        }
+    }
+
     fn is_ptr(&self) -> bool {
         match self.as_basic_value_enum() {
             BasicValueEnum::PointerValue(_) => true,
@@ -80,6 +93,10 @@ impl<'ctx> BasicValueExtension<'ctx> for BasicValueEnum<'ctx> {
 
     fn to_ptr(&self, location: Location) -> CompilerResult<PointerValue<'ctx>> {
         (self as &dyn BasicValue<'ctx>).to_ptr(location)
+    }
+
+    fn to_array(&self, location: Location) -> CompilerResult<ArrayValue<'ctx>> {
+        (self as &dyn BasicValue<'ctx>).to_array(location)
     }
 
     fn is_ptr(&self) -> bool {
