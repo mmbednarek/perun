@@ -136,17 +136,17 @@ impl SymbolTable {
         self.find_symbol_path(&identifier_path, &identifier.value)
     }
 
-    pub fn find_symbol(
+    pub fn find_symbol_with_path(
         &self,
         lookup_path: &SymbolPath,
         name: &str,
-    ) -> SymbolLookupResult<&SymbolInfo> {
+    ) -> SymbolLookupResult<(&SymbolInfo, SymbolPath)> {
         let mut path = lookup_path.clone();
 
         loop {
             let sym = self.symbols.get(&path.sub(name));
             if let Some(symbol) = sym {
-                return Ok(symbol);
+                return Ok((symbol, path));
             }
 
             if path.is_empty() {
@@ -156,6 +156,15 @@ impl SymbolTable {
         }
 
         Err(SymbolLookupError::NoSymbolFound(name.to_string()))
+    }
+
+    pub fn find_symbol(
+        &self,
+        lookup_path: &SymbolPath,
+        name: &str,
+    ) -> SymbolLookupResult<&SymbolInfo> {
+        let (info, _) = self.find_symbol_with_path(lookup_path, name)?;
+        Ok(info)
     }
 
     pub fn find_by_path(&self, path: &SymbolPath) -> Option<&SymbolInfo> {
@@ -200,11 +209,11 @@ impl SymbolTable {
         identifier: &Identifier,
     ) -> SymbolLookupResult<SymbolPath> {
         Ok(if let Some(ns) = &identifier.namespace {
-            let namespace_sym = self.find_symbol(path, ns)?;
-            if namespace_sym.sym_type != SymbolType::Namespace {
+            let (namespace_sym, sym_path) = self.find_symbol_with_path(path, ns)?;
+            if namespace_sym.sym_type != SymbolType::Namespace && namespace_sym.sym_type != SymbolType::TypeDef {
                 return Err(SymbolLookupError::NotANamespace);
             }
-            SymbolPath::new(namespace_sym.name.as_ref())
+            sym_path.sub(namespace_sym.name.as_ref())
         } else {
             path.clone()
         })

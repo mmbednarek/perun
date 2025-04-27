@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use crate::ast::*;
 use crate::ast_passes::type_deduction_pass::deduce_type;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::module::Module;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
-use crate::typing::{FuncType, FuncTypeArg, StructType, Type};
+use crate::typing::{EnumType, FuncType, FuncTypeArg, Identifier, StructType, Type};
 
 pub struct CollectSymbolsPass<'st> {
     symbol_table: &'st mut SymbolTable,
@@ -174,6 +175,32 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
         }
 
         Ok(())
+    }
+
+    fn visit_enum(&mut self, node: &EnumNode, path: &SymbolPath) -> CompilerResult<()> {
+        let mut enum_type = EnumType{
+            enumerations: BTreeMap::new(),
+        };
+
+        let enum_path = path.sub(&node.name);
+
+        for (i, value) in node.enumerations.iter().enumerate() {
+            self.symbol_table.add_symbol(&enum_path, SymbolInfo{
+                name: value.clone(),
+                sym_type: SymbolType::ConstantDef,
+                data_type: Type::Alias(Identifier{namespace: None, value: node.name.clone()}),
+                location: node.location,
+            }).to_comp_res(node.location)?;
+
+            enum_type.enumerations.insert(value.clone(), i as i64);
+        }
+
+        self.symbol_table.add_symbol(path, SymbolInfo{
+            name: node.name.clone(),
+            sym_type: SymbolType::TypeDef,
+            data_type: Type::Enum(enum_type),
+            location: node.location,
+        }).to_comp_res(node.location)
     }
 }
 

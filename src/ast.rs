@@ -342,6 +342,27 @@ impl Into<AnyGlobalStatement> for &StructNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct EnumNode {
+    pub location: Location,
+    pub name: String,
+    pub enumerations: Vec<String>,
+    pub is_public: bool,
+}
+
+impl LocatedNode for EnumNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &EnumNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Enum(self.clone())
+    }
+}
+
+
+#[derive(Debug, Clone)]
 pub struct ImportNode {
     pub location: Location,
     pub module_name: String,
@@ -366,6 +387,7 @@ pub enum AnyGlobalStatement {
     Function(FunctionNode),
     Struct(StructNode),
     Import(ImportNode),
+    Enum(EnumNode),
 }
 
 pub trait GlobalStatementVisitor {
@@ -377,6 +399,7 @@ pub trait GlobalStatementVisitor {
     fn visit_function(&mut self, node: &FunctionNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_struct(&mut self, node: &StructNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_import(&mut self, node: &ImportNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_enum(&mut self, node: &EnumNode, pd: &Self::Payload) -> Self::VisitResult;
 
     fn visit_global_statement(
         &mut self,
@@ -389,6 +412,7 @@ pub trait GlobalStatementVisitor {
             AnyGlobalStatement::Function(node) => self.visit_function(node, pd),
             AnyGlobalStatement::Struct(node) => self.visit_struct(node, pd),
             AnyGlobalStatement::Import(node) => self.visit_import(node, pd),
+            AnyGlobalStatement::Enum(node) => self.visit_enum(node, pd),
         }
     }
 }

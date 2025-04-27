@@ -238,6 +238,16 @@ impl BinaryOperation {
                             .to_comp_res(*location)?,
                     ))
                 }
+                Type::Enum(_) => {
+                    let pred = cmp.to_llvm_int_predicate(true);
+                    let lhs_int = lhs.to_int(*location)?;
+                    let rhs_int = rhs.to_int(*location)?;
+                    Ok(Box::new(
+                        gen.builder
+                            .build_int_compare(pred, lhs_int, rhs_int, "ipred")
+                            .to_comp_res(*location)?,
+                    ))
+                }
                 _ => compiler_err!(*location, "invalid operation"),
             },
             BinaryOperation::Logical(_) => compiler_err!(
@@ -539,8 +549,24 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         if pd.value_type == ValueType::LValue {
             Ok(stmt)
         } else {
-            let deduced_type = self.deduce_type(pd.path.clone(), pd.expected_type.clone(), node)?;
-            self.build_cast(*node.get_location(), &deduced_type, &pd.expected_type, stmt)
+            let deduced_type_raw =
+                self.deduce_type(pd.path.clone(), pd.expected_type.clone(), node)?;
+            let deduced_type = self
+                .ir_builder
+                .symbol_table
+                .resolve_type_alias(&pd.path, deduced_type_raw)
+                .to_comp_res(*node.get_location())?;
+            let expected_type_resolved = self
+                .ir_builder
+                .symbol_table
+                .resolve_type_alias(&pd.path, pd.expected_type.clone())
+                .to_comp_res(*node.get_location())?;
+            self.build_cast(
+                *node.get_location(),
+                &deduced_type,
+                &expected_type_resolved,
+                stmt,
+            )
         }
     }
 
@@ -962,6 +988,18 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         }
         for func_node in &module.functions {
             self.visit_function(func_node, &module_path)?;
+        }
+
+        Ok(())
+    }
+
+    fn visit_enum(&mut self, node: &EnumNode, pd: &SymbolPath) -> Self::VisitResult {
+        let enum_path = pd.sub(&node.name);
+        for (i, enumeration) in node.enumerations.iter().enumerate() {
+            self.ir_builder.ir_value_storage.register_basic_value(
+                enum_path.sub(enumeration),
+                Box::new(self.ir_builder.context.i32_type().const_int(i as u64, true)),
+            );
         }
 
         Ok(())
@@ -1542,7 +1580,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             // For assigment we always expect the left hand side to be an l-value.
             let left_value_type = node.get_left_value_type();
 
-            let (operand_type, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
+            let (operand_type_raw, _) = TypeDeductionPass::new(self.ir_builder.symbol_table)
                 .deduce_operand_and_out_type_for_binary_expression(
                     node,
                     &crate::ast_passes::type_deduction_pass::Payload {
@@ -1550,6 +1588,12 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                         expected_type: pd.expected_type.clone(),
                     },
                 )?;
+
+            let operand_type = self
+                .ir_builder
+                .symbol_table
+                .resolve_type_alias(&pd.path, operand_type_raw)
+                .to_comp_res(node.location)?;
 
             let left = self.translate_with_cast(
                 node.left.as_ref(),

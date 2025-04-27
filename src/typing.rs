@@ -1,6 +1,7 @@
 use crate::token::Keyword;
 use inkwell::context::Context;
 use inkwell::types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum};
+use std::collections::BTreeMap;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,11 @@ pub struct StructType {
 }
 
 type StructTypeBox = Box<StructType>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumType {
+    pub enumerations: BTreeMap<String, i64>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataSize {
@@ -65,6 +71,7 @@ pub enum Type {
     Struct(StructTypeBox),
     Alias(Identifier),
     Function(FuncTypeBox),
+    Enum(EnumType),
 }
 
 fn struct_to_llvm_type<'ctx>(
@@ -141,6 +148,7 @@ impl Type {
                 ctx,
                 struct_type.as_ref(),
             )?)),
+            Type::Enum(_) => Some(BasicTypeEnum::IntType(ctx.i32_type())),
             _ => None,
         }
     }
@@ -252,6 +260,13 @@ impl Display for Type {
                     write!(f, "{},", field.arg_type)?;
                 }
                 write!(f, ") : {}", func_type.ret_type)
+            }
+            Type::Enum(enum_type) => {
+                write!(f, "enum {{")?;
+                for (enum_name, index) in &enum_type.enumerations {
+                    write!(f, "{} = {},", *enum_name, *index)?;
+                }
+                write!(f, "}}")
             }
         }
     }

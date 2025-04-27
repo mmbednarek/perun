@@ -197,6 +197,10 @@ where
                             Box::new((&self.parse_import(location)?).into());
                         result.body.push(import_node);
                     }
+                    Keyword::Enum => {
+                        let enum_node: GlobalStatementBox = Box::new((&self.parse_enum(location, is_public)?).into());
+                        result.body.push(enum_node);
+                    }
                     Keyword::Public => {
                         is_public = true;
                         continue;
@@ -930,6 +934,36 @@ where
         Ok(ImportNode {
             location,
             module_name,
+        })
+    }
+
+    fn parse_enum(&mut self, location: Location, is_public: bool) -> CompilerResult<EnumNode> {
+        let name = self.reader.expect_identifier()?;
+
+        self.reader.expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+
+        let mut enumerations: Vec<String> = Vec::new();
+
+        loop {
+            if self.reader.skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))? {
+                break;
+            }
+
+            let enumeration_tkn = self.reader.expect_identifier()?;
+            enumerations.push(enumeration_tkn);
+
+            if self.reader.skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))? {
+                break;
+            }
+
+            self.reader.expect_token(TokenType::Operator(OperatorType::Comma))?;
+        }
+
+        Ok(EnumNode{
+            location,
+            name,
+            enumerations,
+            is_public,
         })
     }
 }

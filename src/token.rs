@@ -173,6 +173,7 @@ pub enum Keyword {
     Public,
     True,
     False,
+    Enum,
 }
 
 impl Keyword {
@@ -207,6 +208,7 @@ impl Keyword {
             "pub" => Some(Keyword::Public),
             "true" => Some(Keyword::True),
             "false" => Some(Keyword::False),
+            "enum" => Some(Keyword::Enum),
             _ => None,
         }
     }

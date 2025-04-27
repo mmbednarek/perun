@@ -47,4 +47,10 @@ impl GlobalStatementVisitor for ExportModulePass {
     }
 
     fn visit_import(&mut self, _: &ImportNode, _: &Self::Payload) -> Self::VisitResult {}
+
+    fn visit_enum(&mut self, node: &EnumNode, _: &Self::Payload) -> Self::VisitResult {
+        if node.is_public {
+            todo!()
+        }
+    }
 }

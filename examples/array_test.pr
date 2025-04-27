@@ -1,6 +1,30 @@
+import io;
+
+enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+fn print_weekday(wd: Weekday) {
+    var strings: rawptr[7];
+    strings[Weekday::Monday] = "Monday";
+    strings[Weekday::Tuesday] = "Tuesday";
+    strings[Weekday::Wednesday] = "Wednesday";
+    strings[Weekday::Thursday] = "Thursday";
+    strings[Weekday::Friday] = "Friday";
+    strings[Weekday::Saturday] = "Saturday";
+    strings[Weekday::Sunday] = "Sunday";
+
+    io::print(strings[wd]);
+}
 
 fn main() : i32 {
-    var value = 3.5 + 1.2;
-    var other_val = value * 0.5 + 1.5;
-    return other_val;
+    var value = Weekday::Friday;
+    print_weekday(value);
+    return 0;
 }
