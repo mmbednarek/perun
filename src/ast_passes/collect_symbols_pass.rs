@@ -285,6 +285,13 @@ impl<'st> StatementVisitor for CollectSymbolsPass<'st> {
         Ok(())
     }
 
+    fn visit_match_node(&mut self, node: &MatchNode, path: &SymbolPath) -> CompilerResult<()> {
+        for case in &node.cases {
+            self.visit_scope(&case.scope, &path.sub(&case.scope.name))?;
+        }
+        Ok(())
+    }
+
     fn visit_expression_statement_node(
         &mut self,
         _: &ExpressionStatementNode,

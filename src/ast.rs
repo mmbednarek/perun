@@ -541,6 +541,32 @@ impl Into<AnyStatementNode> for &ExpressionStatementNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct MatchCase {
+    pub condition: ExpressionBox,
+    pub scope: ScopeNode,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchNode {
+    pub location: Location,
+    pub expression: ExpressionBox,
+    pub cases: Vec<MatchCase>,
+    pub default_case: Option<ScopeNode>,
+}
+
+impl LocatedNode for MatchNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyStatementNode> for &MatchNode {
+    fn into(self) -> AnyStatementNode {
+        AnyStatementNode::MatchStatement(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum AnyStatementNode {
     ReturnNode(ReturnNode),
     VarDeclNode(VarDeclNode),
@@ -548,6 +574,7 @@ pub enum AnyStatementNode {
     IfNode(IfNode),
     WhileNode(WhileNode),
     ExpressionStatementNode(ExpressionStatementNode),
+    MatchStatement(MatchNode),
 }
 
 impl LocatedNode for AnyStatementNode {
@@ -559,6 +586,7 @@ impl LocatedNode for AnyStatementNode {
             AnyStatementNode::IfNode(node) => node.get_location(),
             AnyStatementNode::WhileNode(node) => node.get_location(),
             AnyStatementNode::ExpressionStatementNode(node) => node.get_location(),
+            AnyStatementNode::MatchStatement(node) => node.get_location(),
         }
     }
 }
@@ -572,6 +600,7 @@ pub trait StatementVisitor {
     fn visit_ref_decl_node(&mut self, node: &RefDeclNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_if_node(&mut self, node: &IfNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_while_node(&mut self, node: &WhileNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_match_node(&mut self, node: &MatchNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_expression_statement_node(
         &mut self,
         node: &ExpressionStatementNode,
@@ -589,6 +618,7 @@ pub trait StatementVisitor {
             AnyStatementNode::RefDeclNode(node) => self.visit_ref_decl_node(node, pd),
             AnyStatementNode::IfNode(node) => self.visit_if_node(node, pd),
             AnyStatementNode::WhileNode(node) => self.visit_while_node(node, pd),
+            AnyStatementNode::MatchStatement(node) => self.visit_match_node(node, pd),
             AnyStatementNode::ExpressionStatementNode(node) => {
                 self.visit_expression_statement_node(node, pd)
             }

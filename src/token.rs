@@ -174,6 +174,7 @@ pub enum Keyword {
     True,
     False,
     Enum,
+    Match,
 }
 
 impl Keyword {
@@ -209,6 +210,7 @@ impl Keyword {
             "true" => Some(Keyword::True),
             "false" => Some(Keyword::False),
             "enum" => Some(Keyword::Enum),
+            "match" => Some(Keyword::Match),
             _ => None,
         }
     }

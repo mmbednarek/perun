@@ -519,6 +519,9 @@ where
                 Keyword::While => {
                     return Ok(Box::new((&self.parse_while_statement(location)?).into()));
                 }
+                Keyword::Match => {
+                    return Ok(Box::new((&self.parse_match_statement(location)?).into()));
+                }
                 _ => {}
             }
         }
@@ -572,6 +575,50 @@ where
             location,
             condition: expr,
             scope,
+        })
+    }
+
+    fn parse_match_statement(&mut self, location: Location) -> CompilerResult<MatchNode> {
+        let expression = self.parse_expression(OperatorType::LeftBrace)?;
+        let mut cases = Vec::<MatchCase>::new();
+
+        let mut default_case: Option<ScopeNode> = None;
+
+        loop {
+            if self
+                .reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::RightBrace))?
+            {
+                break;
+            }
+
+            if self
+                .reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::Asterisk))?
+            {
+                if self
+                    .reader
+                    .skip_token_if_present(TokenType::Operator(OperatorType::LeftBrace))?
+                {
+                    let scope_name = get_random_identifier("default_case_body");
+                    default_case = Some(self.parse_scope(scope_name.as_ref())?);
+                    continue;
+                } else {
+                    self.reader.seek_back();
+                }
+            }
+
+            let condition = self.parse_expression(OperatorType::LeftBrace)?;
+            let scope_name = get_random_identifier("case_body");
+            let scope = self.parse_scope(scope_name.as_ref())?;
+            cases.push(MatchCase { condition, scope });
+        }
+
+        Ok(MatchNode {
+            location,
+            expression,
+            cases,
+            default_case,
         })
     }
 

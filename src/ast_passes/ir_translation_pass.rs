@@ -16,6 +16,7 @@ use inkwell::values::{
     IntMathValue, IntValue, PointerValue,
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
+use serde_json::error::Category::Data;
 
 impl AssignmentBinaryOperation {
     pub fn get_stored_value<'ctx, 'st>(
@@ -536,6 +537,16 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     _ => compiler_err!(location, "invalid cast target type"),
                 }
             }
+            Type::Enum(_) => match target_type {
+                Type::Integer(_, data_size) => {
+                    if *data_size == DataSize::Bits32 {
+                        Ok(value)
+                    } else {
+                        compiler_err!(location, "invalid cast source type")
+                    }
+                }
+                _ => compiler_err!(location, "invalid cast source type"),
+            },
             _ => compiler_err!(location, "invalid cast source type"),
         }
     }
@@ -802,6 +813,32 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             .builder
             .build_alloca(translated_type, name)
             .to_comp_res(*location)
+    }
+
+    pub fn build_match_case_condition(
+        &self,
+        cond_type: &Type,
+        expr: &AnyExpressionNode,
+        pd: &ExpressionPayload<'ctx>,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
+        if let Type::Enum(enum_type) = cond_type {
+            match expr {
+                AnyExpressionNode::Identifier(identifier) => {
+                    let opt_index = enum_type.enumerations.get(identifier.name.value.as_str());
+                    if let Some(index) = opt_index {
+                        return Ok(Box::new(
+                            self.ir_builder
+                                .context
+                                .i32_type()
+                                .const_int(*index as u64, true),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.translate_with_cast(expr, pd)
     }
 }
 
@@ -1224,6 +1261,99 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         )?;
 
         self.ir_builder.builder.position_at_end(while_end);
+
+        Ok(())
+    }
+
+    fn visit_match_node(&mut self, node: &MatchNode, pd: &Self::Payload) -> CompilerResult<()> {
+        let expr_type_unresolved = self.deduce_type(
+            pd.path.clone(),
+            Type::Integer(true, DataSize::Bits32),
+            node.expression.as_ref(),
+        )?;
+        let expr_type = self
+            .ir_builder
+            .symbol_table
+            .resolve_type_alias(&pd.path, expr_type_unresolved)
+            .to_comp_res(node.location)?;
+
+        let expr = self.translate_with_cast(
+            node.expression.as_ref(),
+            &ExpressionPayload {
+                path: pd.path.clone(),
+                function: pd.function,
+                expected_type: Type::Integer(true, DataSize::Bits32),
+                value_type: ValueType::RValue,
+            },
+        )?;
+
+        let current_block = self
+            .ir_builder
+            .builder
+            .get_insert_block()
+            .to_comp_res_with_desc(node.location, "statement not located in a valid block")?;
+
+        let epilogue_block = self
+            .ir_builder
+            .context
+            .append_basic_block(pd.function, "match.epilogue");
+
+        let mut cases = Vec::<(IntValue<'ctx>, BasicBlock<'ctx>)>::new();
+        for case in &node.cases {
+            let cond = self.build_match_case_condition(
+                &expr_type,
+                case.condition.as_ref(),
+                &ExpressionPayload {
+                    path: pd.path.clone(),
+                    function: pd.function,
+                    expected_type: Type::Integer(true, DataSize::Bits32),
+                    value_type: ValueType::RValue,
+                },
+            )?;
+
+            let block = self.translate_scope(
+                &case.scope,
+                &StatementPayload {
+                    path: pd.path.sub(case.scope.name.as_str()),
+                    function: pd.function,
+                },
+            )?;
+
+            self.ir_builder
+                .builder
+                .build_unconditional_branch(epilogue_block)
+                .to_comp_res(node.location)?;
+
+            cases.push((cond.to_int(*case.condition.get_location())?, block));
+        }
+
+        let else_block = if let Some(def_case) = &node.default_case {
+            let block = self.translate_scope(
+                def_case,
+                &StatementPayload {
+                    path: pd.path.sub(def_case.name.as_str()),
+                    function: pd.function,
+                },
+            )?;
+
+            self.ir_builder
+                .builder
+                .build_unconditional_branch(epilogue_block)
+                .to_comp_res(node.location)?;
+
+            block
+        } else {
+            epilogue_block
+        };
+
+        self.ir_builder.builder.position_at_end(current_block);
+
+        self.ir_builder
+            .builder
+            .build_switch(expr.to_int(node.location)?, else_block, cases.as_slice())
+            .to_comp_res(node.location)?;
+
+        self.ir_builder.builder.position_at_end(epilogue_block);
 
         Ok(())
     }

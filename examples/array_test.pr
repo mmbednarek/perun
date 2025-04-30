@@ -25,7 +25,16 @@ fn print_weekday(wd: Weekday) {
 }
 
 fn main() : i32 {
-    var value = Weekday::Friday;
+    var value = Weekday::Thursday;
     print_weekday(value);
+
+    io::print("\n");
+
+    match value {
+        Monday { io::print("It's monday\n"); }
+        Friday { io::print("It's friday\n"); }
+        * { io::print("It's neither\n"); }
+    }
+
     return 0;
 }
