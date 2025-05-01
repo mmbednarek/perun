@@ -2,6 +2,7 @@ use rand::{distributions::Alphanumeric, Rng};
 
 use crate::ast::FunctionLinkage::Standard;
 use crate::ast::*;
+use crate::ast_passes::ir_translation_pass::ExpressionPayload;
 use crate::error::{wrap_option, CompilerResult};
 use crate::token::{Keyword, Location, OperatorType, TokenType};
 use crate::token_reader::TokenReader;
@@ -627,12 +628,11 @@ where
         Ok(expr)
     }
 
-    fn parse_member_expression(
+    fn parse_single_member_expression(
         &mut self,
         location: Location,
-        builder: &mut ExpressionBuilder,
         object_expr: ExpressionBox,
-    ) -> CompilerResult<()> {
+    ) -> CompilerResult<AnyExpressionNode> {
         self.reader.next()?;
         let (field_loc, field_name) = self.reader.expect_identifier_with_loc()?;
         if self
@@ -646,27 +646,41 @@ where
                     value: field_name.to_string(),
                 },
             )?;
-            builder.push_expr(
-                (&MethodCall {
-                    location,
-                    object_expr,
-                    name: field_name,
-                    args: func_call.args,
-                })
-                    .into(),
-            );
+
+            Ok((&MethodCall {
+                location,
+                object_expr,
+                name: field_name,
+                args: func_call.args,
+            })
+                .into())
         } else {
-            builder.push_expr(
-                (&GetFieldNode {
-                    location,
-                    object_expr,
-                    field_name,
-                })
-                    .into(),
-            );
+            Ok((&GetFieldNode {
+                location,
+                object_expr,
+                field_name,
+            })
+                .into())
+        }
+    }
+
+    fn parse_member_expression(
+        &mut self,
+        location: Location,
+        object_expr: ExpressionBox,
+    ) -> CompilerResult<AnyExpressionNode> {
+        let mut expr = self.parse_single_member_expression(location.clone(), object_expr)?;
+
+        loop {
+            let tkn = self.reader.peek()?;
+            if tkn.token_type != TokenType::Operator(OperatorType::Dot) {
+                break;
+            }
+
+            expr = self.parse_single_member_expression(location.clone(), Box::new(expr))?;
         }
 
-        Ok(())
+        Ok(expr)
     }
 
     fn parse_identifier_continuation(
@@ -680,7 +694,13 @@ where
             TokenType::Operator(OperatorType::LeftParen) => {
                 self.reader.next()?;
                 let call = self.parse_function_call(peeked.location, identifier)?;
-                builder.push_expr((&call).into());
+                if self.reader.peek()?.token_type == TokenType::Operator(OperatorType::Dot) {
+                    builder.push_expr(
+                        self.parse_member_expression(location.clone(), Box::new((&call).into()))?,
+                    );
+                } else {
+                    builder.push_expr((&call).into());
+                }
             }
             TokenType::Operator(OperatorType::LeftSquare) => {
                 self.reader.next()?;
@@ -701,17 +721,18 @@ where
                 );
             }
             TokenType::Operator(OperatorType::Dot) => {
-                self.parse_member_expression(
-                    location.clone(),
-                    builder,
-                    Box::new(
-                        (&IdentifierNode {
-                            location: *location,
-                            name: identifier,
-                        })
-                            .into(),
-                    ),
-                )?;
+                builder.push_expr(
+                    self.parse_member_expression(
+                        location.clone(),
+                        Box::new(
+                            (&IdentifierNode {
+                                location: *location,
+                                name: identifier,
+                            })
+                                .into(),
+                        ),
+                    )?,
+                );
             }
             TokenType::Operator(OperatorType::DoubleColon) => {
                 self.reader.next()?;
@@ -799,16 +820,17 @@ where
                     Keyword::SelfKw => {
                         let peeked = self.reader.peek()?.clone();
                         if peeked.token_type == TokenType::Operator(OperatorType::Dot) {
-                            self.parse_member_expression(
-                                token.location.clone(),
-                                &mut builder,
-                                Box::new(
-                                    (&SelfNode {
-                                        location: token.location,
-                                    })
-                                        .into(),
-                                ),
-                            )?;
+                            builder.push_expr(
+                                self.parse_member_expression(
+                                    token.location.clone(),
+                                    Box::new(
+                                        (&SelfNode {
+                                            location: token.location,
+                                        })
+                                            .into(),
+                                    ),
+                                )?,
+                            );
                         } else {
                             builder.push_expr(
                                 (&SelfNode {

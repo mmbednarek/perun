@@ -16,7 +16,6 @@ use inkwell::values::{
     IntMathValue, IntValue, PointerValue,
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
-use serde_json::error::Category::Data;
 
 impl AssignmentBinaryOperation {
     pub fn get_stored_value<'ctx, 'st>(
@@ -487,6 +486,13 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                             )
                             .to_comp_res(location)?,
                     )),
+                    Type::Enum(_) => {
+                        if *src_data_size == DataSize::Bits32 {
+                            Ok(value)
+                        } else {
+                            compiler_err!(location, "incompatible enum type")
+                        }
+                    }
                     _ => compiler_err!(location, "invalid cast target type"),
                 }
             }
@@ -891,10 +897,16 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             }
         }
 
+        let resolved_ret_type = self
+            .ir_builder
+            .symbol_table
+            .resolve_type_alias(path, node.ret_type.clone())
+            .to_comp_res(node.location)?;
+
         let fn_type = visit_any_type!(
             node.location,
             self.ir_builder.context,
-            &node.ret_type,
+            &resolved_ret_type,
             value,
             Ok(value.fn_type(&args[..], false))
         )?;
@@ -1025,6 +1037,9 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         }
         for func_node in &module.functions {
             self.visit_function(func_node, &module_path)?;
+        }
+        for enum_node in &module.enums {
+            self.visit_enum(enum_node, &module_path)?;
         }
 
         Ok(())
@@ -1855,7 +1870,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         node: &FunctionCall,
         pd: &ExpressionPayload<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
-        assert_ne!(pd.value_type, ValueType::LValue);
+        if pd.value_type == ValueType::LValue {
+            return compiler_err!(node.location, "Error while compiling a call to function \"{}\", its return value is used as an l-value", node.name.value.as_str());
+        }
+
         let path = self
             .ir_builder
             .symbol_table

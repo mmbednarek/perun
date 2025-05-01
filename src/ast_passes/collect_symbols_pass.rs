@@ -173,6 +173,9 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
         for func_node in &module.functions {
             self.visit_function(func_node, &module_path)?;
         }
+        for enum_node in &module.enums {
+            self.visit_enum(enum_node, &module_path)?;
+        }
 
         Ok(())
     }

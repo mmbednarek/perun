@@ -1,6 +1,6 @@
 use crate::ast::{
-    AnyExpressionNode, ConstDeclNode, ExpressionBox, FunctionArg, FunctionLinkage, FunctionNode,
-    StructField, StructNode,
+    AnyExpressionNode, ConstDeclNode, EnumNode, ExpressionBox, FunctionArg, FunctionLinkage,
+    FunctionNode, StructField, StructNode,
 };
 use crate::lexer::Lexer;
 use crate::module_api::{load_module, ModuleCore};
@@ -14,6 +14,7 @@ pub struct Module {
     pub functions: Vec<FunctionNode>,
     pub constants: Vec<ConstDeclNode>,
     pub structs: Vec<StructNode>,
+    pub enums: Vec<EnumNode>,
 }
 
 fn expression_to_string(expr: &AnyExpressionNode) -> String {
@@ -47,6 +48,7 @@ impl Module {
             functions: Vec::new(),
             constants: Vec::new(),
             structs: Vec::new(),
+            enums: Vec::new(),
         };
 
         for constant in &module_core.constants {
@@ -119,6 +121,15 @@ impl Module {
             });
         }
 
+        for enum_value in &module_core.enums {
+            module.enums.push(EnumNode {
+                location,
+                name: enum_value.name.clone(),
+                enumerations: enum_value.enumerations.clone(),
+                is_public: true,
+            })
+        }
+
         Some(module)
     }
 
@@ -128,6 +139,7 @@ impl Module {
             functions: vec![],
             constants: vec![],
             structs: vec![],
+            enums: vec![],
         };
 
         for func in &self.functions {
@@ -172,6 +184,13 @@ impl Module {
             module.structs.push(crate::module_api::Struct {
                 name: structure.name.clone(),
                 arguments: struct_fields,
+            });
+        }
+
+        for enum_node in &self.enums {
+            module.enums.push(crate::module_api::Enum {
+                name: enum_node.name.clone(),
+                enumerations: enum_node.enumerations.clone(),
             });
         }
 

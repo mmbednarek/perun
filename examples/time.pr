@@ -1,0 +1,74 @@
+struct tm {
+  tm_sec:    i32,
+  tm_min:    i32,
+  tm_hour:   i32,
+  tm_mday:   i32,
+  tm_mon:    i32,
+  tm_year:   i32,
+  tm_wday:   i32,
+  tm_yday:   i32,
+  tm_isdst:  i32,
+  tm_gmtoff: i64,
+  tm_zone:   rawptr,
+};
+
+extern fn time(timer: *u64) : u64;
+extern fn mktime(tp: *tm) : u64;
+extern fn localtime(timer: *u64) : *tm;
+
+pub enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+pub fn Weekday.to_string(self) : rawptr {
+    match self {
+        Monday { return "Monday"; }
+        Tuesday { return "Tuesday"; }
+        Wednesday { return "Wednesday"; }
+        Thursday { return "Thursday"; }
+        Friday { return "Friday"; }
+        Saturday { return "Saturday"; }
+        Sunday { return "Sunday"; }
+    }
+    return "";
+}
+
+pub struct TimePoint {
+    time_stamp: u64,
+}
+
+pub fn now() : TimePoint {
+    var tp: TimePoint;
+    tp.time_stamp = time(null);
+    return tp;
+}
+
+pub fn TimePoint.year(ref self) : i32 {
+    var info_ptr = localtime(&self.time_stamp);
+    ref info: tm = *info_ptr;
+    return info.tm_year;
+}
+
+pub fn TimePoint.month(ref self) : i32 {
+    var info_ptr = localtime(&self.time_stamp);
+    ref info: tm = *info_ptr;
+    return info.tm_mon;
+}
+
+pub fn TimePoint.day(ref self) : i32 {
+    var info_ptr = localtime(&self.time_stamp);
+    ref info: tm = *info_ptr;
+    return info.tm_mday;
+}
+
+pub fn TimePoint.weekday(ref self) : Weekday {
+    var info_ptr = localtime(&self.time_stamp);
+    ref info: tm = *info_ptr;
+    return info.tm_wday - 1;
+}

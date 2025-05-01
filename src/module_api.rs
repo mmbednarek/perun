@@ -36,11 +36,18 @@ pub struct Struct {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct Enum {
+    pub name: String,
+    pub enumerations: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ModuleCore {
     pub name: String,
     pub functions: Vec<Function>,
     pub constants: Vec<Constant>,
     pub structs: Vec<Struct>,
+    pub enums: Vec<Enum>,
 }
 
 pub fn load_module(path: &str) -> Option<ModuleCore> {

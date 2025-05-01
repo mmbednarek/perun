@@ -5,6 +5,7 @@ use crate::error::{CompilerResult, CompilerResultErrorMapperWithDesc};
 use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::symbols::SymbolPath;
 use crate::typing::{DataSize, Type};
+use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{FloatValue, IntValue, PointerValue};
 
@@ -105,6 +106,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
             .i8_type()
             .array_type(node.value.len() as u32);
         let global_val = self.build_context.module.add_global(arr, None, "str");
+        global_val.set_linkage(Linkage::Private);
         global_val.set_constant(true);
 
         let str_val = self

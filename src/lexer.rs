@@ -188,6 +188,10 @@ impl<'src> Lexer<'src> {
 
                 if !ch.is_numeric() && ch != '.' {
                     self.is_current_token_numeric = false;
+                    if self.current_token == "." {
+                        self.push_token(TokenType::Operator(OperatorType::Dot));
+                        self.reset_current_identifier();
+                    }
                 }
                 self.current_token.push(ch);
             }

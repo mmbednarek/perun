@@ -41,11 +41,14 @@ $(BUILD_DIR)/linked_list: $(BUILD_DIR)/linked_list.o $(BUILD_DIR)/corelib.o
 $(BUILD_DIR)/method_test: $(BUILD_DIR)/method_test.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/io.o
 	gcc $(BUILD_DIR)/method_test.o  $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o -o $(BUILD_DIR)/method_test
 
-$(BUILD_DIR)/array_test.o $(BUILD_DIR)/array_test.json: $(BUILD_DIR) array_test.pr
-	$(PERUNC) array_test.pr -o $(BUILD_DIR)/array_test.o -m $(BUILD_DIR)/array_test.json
+$(BUILD_DIR)/array_test.o $(BUILD_DIR)/array_test.json: $(BUILD_DIR) array_test.pr $(BUILD_DIR)/time.json $(BUILD_DIR)/io.json
+	$(PERUNC) array_test.pr -o $(BUILD_DIR)/array_test.o -m $(BUILD_DIR)/array_test.json -i $(BUILD_DIR)
 
-$(BUILD_DIR)/array_test: $(BUILD_DIR)/array_test.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/io.o
-	gcc $(BUILD_DIR)/array_test.o  $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o -o $(BUILD_DIR)/array_test
+$(BUILD_DIR)/time.o $(BUILD_DIR)/time.json: $(BUILD_DIR) time.pr
+	$(PERUNC) time.pr -o $(BUILD_DIR)/time.o -m $(BUILD_DIR)/time.json
+
+$(BUILD_DIR)/array_test: $(BUILD_DIR)/array_test.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/io.o $(BUILD_DIR)/time.o
+	gcc $(BUILD_DIR)/array_test.o  $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/time.o -o $(BUILD_DIR)/array_test
 
 clean:
 	rm -rf build-dir

@@ -13,6 +13,7 @@ impl ExportModulePass {
                 functions: vec![],
                 constants: vec![],
                 structs: vec![],
+                enums: vec![],
             },
         }
     }
@@ -50,7 +51,7 @@ impl GlobalStatementVisitor for ExportModulePass {
 
     fn visit_enum(&mut self, node: &EnumNode, _: &Self::Payload) -> Self::VisitResult {
         if node.is_public {
-            todo!()
+            self.module.enums.push(node.clone());
         }
     }
 }

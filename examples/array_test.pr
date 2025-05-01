@@ -1,40 +1,12 @@
 import io;
-
-enum Weekday {
-    Monday,
-    Tuesday,
-    Wednesday,
-    Thursday,
-    Friday,
-    Saturday,
-    Sunday,
-}
-
-const weekday_strings: rawptr[7] = {
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-};
-
-fn print_weekday(wd: Weekday) {
-    io::print(weekday_strings[wd]);
-}
+import time;
 
 fn main() : i32 {
-    var value = Weekday::Thursday;
-    print_weekday(value);
+    var current_time = time::now();
 
-    io::print("\n");
-
-    match value {
-        Monday { io::print("It's monday\n"); }
-        Friday { io::print("It's friday\n"); }
-        * { io::print("It's neither\n"); }
-    }
+    io::print("Today is ");
+    io::print(current_time.weekday().to_string());
+    io::print("!\n");
 
     return 0;
 }
