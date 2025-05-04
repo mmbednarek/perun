@@ -1041,11 +1041,14 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         for enum_node in &module.enums {
             self.visit_enum(enum_node, &module_path)?;
         }
+        for alias_node in &module.aliases {
+            self.visit_alias(alias_node, &module_path)?;
+        }
 
         Ok(())
     }
 
-    fn visit_enum(&mut self, node: &EnumNode, pd: &SymbolPath) -> Self::VisitResult {
+    fn visit_enum(&mut self, node: &EnumNode, pd: &SymbolPath) -> CompilerResult<()> {
         let enum_path = pd.sub(&node.name);
         for (i, enumeration) in node.enumerations.iter().enumerate() {
             self.ir_builder.ir_value_storage.register_basic_value(
@@ -1054,6 +1057,11 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             );
         }
 
+        Ok(())
+    }
+
+    fn visit_alias(&mut self, _: &AliasNode, _: &SymbolPath) -> CompilerResult<()> {
+        // nothing to do
         Ok(())
     }
 }

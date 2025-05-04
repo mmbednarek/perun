@@ -8,5 +8,6 @@ fn main() : i32 {
     io::print(current_time.weekday().to_string());
     io::print("!\n");
 
-    return 0;
+    var second_count: time::Seconds = 125;
+    return second_count.minutes();
 }

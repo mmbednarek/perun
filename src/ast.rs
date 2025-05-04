@@ -380,6 +380,26 @@ impl Into<AnyGlobalStatement> for &ImportNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct AliasNode {
+    pub location: Location,
+    pub is_public: bool,
+    pub name: String,
+    pub aliased_type: Type,
+}
+
+impl LocatedNode for AliasNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &AliasNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Alias(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum AnyGlobalStatement {
     SourceUnit(SourceUnit),
     ConstDecl(ConstDeclNode),
@@ -387,6 +407,7 @@ pub enum AnyGlobalStatement {
     Struct(StructNode),
     Import(ImportNode),
     Enum(EnumNode),
+    Alias(AliasNode),
 }
 
 pub trait GlobalStatementVisitor {
@@ -399,6 +420,7 @@ pub trait GlobalStatementVisitor {
     fn visit_struct(&mut self, node: &StructNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_import(&mut self, node: &ImportNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_enum(&mut self, node: &EnumNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_alias(&mut self, node: &AliasNode, pd: &Self::Payload) -> Self::VisitResult;
 
     fn visit_global_statement(
         &mut self,
@@ -412,6 +434,7 @@ pub trait GlobalStatementVisitor {
             AnyGlobalStatement::Struct(node) => self.visit_struct(node, pd),
             AnyGlobalStatement::Import(node) => self.visit_import(node, pd),
             AnyGlobalStatement::Enum(node) => self.visit_enum(node, pd),
+            AnyGlobalStatement::Alias(node) => self.visit_alias(node, pd),
         }
     }
 }

@@ -2,7 +2,6 @@ use rand::{distributions::Alphanumeric, Rng};
 
 use crate::ast::FunctionLinkage::Standard;
 use crate::ast::*;
-use crate::ast_passes::ir_translation_pass::ExpressionPayload;
 use crate::error::{wrap_option, CompilerResult};
 use crate::token::{Keyword, Location, OperatorType, TokenType};
 use crate::token_reader::TokenReader;
@@ -202,6 +201,11 @@ where
                         let enum_node: GlobalStatementBox =
                             Box::new((&self.parse_enum(location, is_public)?).into());
                         result.body.push(enum_node);
+                    }
+                    Keyword::Alias => {
+                        let alias_node: GlobalStatementBox =
+                            Box::new((&self.parse_alias(location, is_public)?).into());
+                        result.body.push(alias_node);
                     }
                     Keyword::Public => {
                         is_public = true;
@@ -1071,5 +1075,20 @@ where
         }
 
         Ok(node)
+    }
+
+    fn parse_alias(&mut self, location: Location, is_public: bool) -> CompilerResult<AliasNode> {
+        let name = self.reader.expect_identifier()?;
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::Equals))?;
+        let aliased_type = self.parse_type()?;
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::Semicolon))?;
+        Ok(AliasNode {
+            location,
+            is_public,
+            name,
+            aliased_type,
+        })
     }
 }

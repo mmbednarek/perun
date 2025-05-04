@@ -42,12 +42,19 @@ pub struct Enum {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct Alias {
+    pub name: String,
+    pub aliased_type: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ModuleCore {
     pub name: String,
     pub functions: Vec<Function>,
     pub constants: Vec<Constant>,
     pub structs: Vec<Struct>,
     pub enums: Vec<Enum>,
+    pub aliases: Vec<Alias>,
 }
 
 pub fn load_module(path: &str) -> Option<ModuleCore> {

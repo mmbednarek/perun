@@ -16,6 +16,59 @@ extern fn time(timer: *u64) : u64;
 extern fn mktime(tp: *tm) : u64;
 extern fn localtime(timer: *u64) : *tm;
 
+pub alias Seconds = u32;
+pub alias Minutes = u32;
+pub alias Hours = u32;
+pub alias Days = u32;
+
+pub fn Seconds.minutes(self) : Minutes {
+    return self / 60;
+}
+
+pub fn Seconds.hours(self) : Hours {
+    return self / 3600;
+}
+
+pub fn Seconds.days(self) : Days {
+    return self / 86400;
+}
+
+pub fn Minutes.seconds(self) : Seconds {
+    return self * 60;
+}
+
+pub fn Minutes.hours(self) : Hours {
+    return self / 60;
+}
+
+pub fn Minutes.days(self) : Days {
+    return self / 1440;
+}
+
+pub fn Hours.seconds(self) : Seconds {
+    return self * 3600;
+}
+
+pub fn Hours.minutes(self) : Minutes {
+    return self * 60;
+}
+
+pub fn Hours.days(self) : Days {
+    return self / 24;
+}
+
+pub fn Days.seconds(self) : Seconds {
+    return self * 86400;
+}
+
+pub fn Days.minutes(self) : Days {
+    return self * 1440;
+}
+
+pub fn Days.hours(self) : Hours {
+    return self * 24;
+}
+
 pub enum Weekday {
     Monday,
     Tuesday,
@@ -70,5 +123,5 @@ pub fn TimePoint.day(ref self) : i32 {
 pub fn TimePoint.weekday(ref self) : Weekday {
     var info_ptr = localtime(&self.time_stamp);
     ref info: tm = *info_ptr;
-    return info.tm_wday - 1;
+    return (info.tm_wday + 6) % 7;
 }

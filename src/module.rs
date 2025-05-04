@@ -1,6 +1,6 @@
 use crate::ast::{
-    AnyExpressionNode, ConstDeclNode, EnumNode, ExpressionBox, FunctionArg, FunctionLinkage,
-    FunctionNode, StructField, StructNode,
+    AliasNode, AnyExpressionNode, ConstDeclNode, EnumNode, ExpressionBox, FunctionArg,
+    FunctionLinkage, FunctionNode, StructField, StructNode,
 };
 use crate::lexer::Lexer;
 use crate::module_api::{load_module, ModuleCore};
@@ -15,6 +15,7 @@ pub struct Module {
     pub constants: Vec<ConstDeclNode>,
     pub structs: Vec<StructNode>,
     pub enums: Vec<EnumNode>,
+    pub aliases: Vec<AliasNode>,
 }
 
 fn expression_to_string(expr: &AnyExpressionNode) -> String {
@@ -49,6 +50,7 @@ impl Module {
             constants: Vec::new(),
             structs: Vec::new(),
             enums: Vec::new(),
+            aliases: Vec::new(),
         };
 
         for constant in &module_core.constants {
@@ -130,6 +132,18 @@ impl Module {
             })
         }
 
+        for alias_value in &module_core.aliases {
+            module.aliases.push(AliasNode {
+                location,
+                is_public: true,
+                name: alias_value.name.clone(),
+                aliased_type: Type::from_string(
+                    Some(module_core.name.clone()),
+                    alias_value.aliased_type.as_ref(),
+                ),
+            })
+        }
+
         Some(module)
     }
 
@@ -140,6 +154,7 @@ impl Module {
             constants: vec![],
             structs: vec![],
             enums: vec![],
+            aliases: vec![],
         };
 
         for func in &self.functions {
@@ -192,6 +207,13 @@ impl Module {
                 name: enum_node.name.clone(),
                 enumerations: enum_node.enumerations.clone(),
             });
+        }
+
+        for alias_node in &self.aliases {
+            module.aliases.push(crate::module_api::Alias {
+                name: alias_node.name.clone(),
+                aliased_type: alias_node.aliased_type.to_string(),
+            })
         }
 
         module

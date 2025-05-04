@@ -176,6 +176,9 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
         for enum_node in &module.enums {
             self.visit_enum(enum_node, &module_path)?;
         }
+        for alias_node in &module.aliases {
+            self.visit_alias(alias_node, &module_path)?;
+        }
 
         Ok(())
     }
@@ -213,6 +216,20 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
                     name: node.name.clone(),
                     sym_type: SymbolType::TypeDef,
                     data_type: Type::Enum(enum_type),
+                    location: node.location,
+                },
+            )
+            .to_comp_res(node.location)
+    }
+
+    fn visit_alias(&mut self, node: &AliasNode, path: &SymbolPath) -> Self::VisitResult {
+        self.symbol_table
+            .add_symbol(
+                path,
+                SymbolInfo {
+                    name: node.name.clone(),
+                    sym_type: SymbolType::TypeDef,
+                    data_type: node.aliased_type.clone(),
                     location: node.location,
                 },
             )
