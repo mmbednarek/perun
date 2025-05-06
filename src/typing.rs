@@ -1,22 +1,23 @@
 use crate::token::Keyword;
 use inkwell::context::Context;
 use inkwell::types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Identifier {
     pub namespace: Option<String>,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct FuncTypeArg {
     pub is_ref: bool,
     pub arg_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct FuncType {
     pub args: Vec<FuncTypeArg>,
     pub ret_type: Type,
@@ -24,19 +25,19 @@ pub struct FuncType {
 
 pub type FuncTypeBox = Box<FuncType>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct StructType {
     pub fields: Vec<Type>,
 }
 
 type StructTypeBox = Box<StructType>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EnumType {
     pub enumerations: BTreeMap<String, i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum DataSize {
     Bits8,
     Bits16,
@@ -59,14 +60,15 @@ impl DataSize {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "type")]
 pub enum Type {
     Void,
     RawPtr,
-    TypedPtr(Box<Type>),
-    Integer(/*is_signed: */ bool, /*size: */ DataSize),
-    FloatingPoint(DataSize),
-    StaticArray(Box<Type>, u32),
+    TypedPtr { inner_type: Box<Type> },
+    Integer { is_signed: bool, size: DataSize },
+    FloatingPoint { size: DataSize },
+    StaticArray { element_type: Box<Type>, count: u32 },
     Bool,
     Struct(StructTypeBox),
     Alias(Identifier),
@@ -87,19 +89,63 @@ fn struct_to_llvm_type<'ctx>(
 }
 
 impl Type {
+    pub fn with_namespace(&self, ns: &str) -> Type {
+        match self {
+            Type::Alias(identifier) => {
+                if identifier.namespace.is_none() {
+                    Type::Alias(Identifier {
+                        namespace: Some(ns.to_owned()),
+                        value: identifier.value.to_owned(),
+                    })
+                } else {
+                    self.clone()
+                }
+            }
+            _ => self.clone(),
+        }
+    }
+
     pub fn from_string(namespace: Option<String>, s: &str) -> Type {
         match s {
             "void" => Type::Void,
-            "i8" => Type::Integer(true, DataSize::Bits8),
-            "i16" => Type::Integer(true, DataSize::Bits16),
-            "i32" => Type::Integer(true, DataSize::Bits32),
-            "i64" => Type::Integer(true, DataSize::Bits64),
-            "u8" => Type::Integer(false, DataSize::Bits8),
-            "u16" => Type::Integer(false, DataSize::Bits16),
-            "u32" => Type::Integer(false, DataSize::Bits32),
-            "u64" => Type::Integer(false, DataSize::Bits64),
-            "f32" => Type::FloatingPoint(DataSize::Bits32),
-            "f64" => Type::FloatingPoint(DataSize::Bits64),
+            "i8" => Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits8,
+            },
+            "i16" => Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits16,
+            },
+            "i32" => Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits32,
+            },
+            "i64" => Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits64,
+            },
+            "u8" => Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits8,
+            },
+            "u16" => Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits16,
+            },
+            "u32" => Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits32,
+            },
+            "u64" => Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits64,
+            },
+            "f32" => Type::FloatingPoint {
+                size: DataSize::Bits32,
+            },
+            "f64" => Type::FloatingPoint {
+                size: DataSize::Bits64,
+            },
             "bool" => Type::Bool,
             "rawptr" => Type::RawPtr,
             _ => Type::Alias(Identifier {
@@ -113,16 +159,44 @@ impl Type {
         match kw {
             Keyword::Void => Some(Type::Void),
             Keyword::RawPtr => Some(Type::RawPtr),
-            Keyword::Int8 => Some(Type::Integer(true, DataSize::Bits8)),
-            Keyword::Int16 => Some(Type::Integer(true, DataSize::Bits16)),
-            Keyword::Int32 => Some(Type::Integer(true, DataSize::Bits32)),
-            Keyword::Int64 => Some(Type::Integer(true, DataSize::Bits64)),
-            Keyword::UInt8 => Some(Type::Integer(false, DataSize::Bits8)),
-            Keyword::UInt16 => Some(Type::Integer(false, DataSize::Bits16)),
-            Keyword::UInt32 => Some(Type::Integer(false, DataSize::Bits32)),
-            Keyword::UInt64 => Some(Type::Integer(false, DataSize::Bits64)),
-            Keyword::Float32 => Some(Type::FloatingPoint(DataSize::Bits32)),
-            Keyword::Float64 => Some(Type::FloatingPoint(DataSize::Bits64)),
+            Keyword::Int8 => Some(Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits8,
+            }),
+            Keyword::Int16 => Some(Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits16,
+            }),
+            Keyword::Int32 => Some(Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits32,
+            }),
+            Keyword::Int64 => Some(Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits64,
+            }),
+            Keyword::UInt8 => Some(Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits8,
+            }),
+            Keyword::UInt16 => Some(Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits16,
+            }),
+            Keyword::UInt32 => Some(Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits32,
+            }),
+            Keyword::UInt64 => Some(Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits64,
+            }),
+            Keyword::Float32 => Some(Type::FloatingPoint {
+                size: DataSize::Bits32,
+            }),
+            Keyword::Float64 => Some(Type::FloatingPoint {
+                size: DataSize::Bits64,
+            }),
             Keyword::Bool => Some(Type::Bool),
             _ => None,
         }
@@ -130,19 +204,28 @@ impl Type {
 
     pub fn to_llvm_basic_type<'ctx>(&self, ctx: &'ctx Context) -> Option<BasicTypeEnum<'ctx>> {
         match self {
-            Type::RawPtr | Type::TypedPtr(_) => Some(BasicTypeEnum::PointerType(
+            Type::RawPtr | Type::TypedPtr { .. } => Some(BasicTypeEnum::PointerType(
                 ctx.ptr_type(inkwell::AddressSpace::from(0)),
             )),
-            Type::Integer(_, bits) => Some(ctx.custom_width_int_type(bits.bit_count()).into()),
-            Type::FloatingPoint(bits) => match bits {
+            Type::Integer {
+                is_signed: _is_signed,
+                size,
+            } => Some(ctx.custom_width_int_type(size.bit_count()).into()),
+            Type::FloatingPoint { size } => match size {
                 DataSize::Bits8 => None,
                 DataSize::Bits16 => Some(ctx.f16_type().into()),
                 DataSize::Bits32 => Some(ctx.f32_type().into()),
                 DataSize::Bits64 => Some(ctx.f64_type().into()),
             },
-            Type::StaticArray(sub_type, count) => {
-                Some(sub_type.to_llvm_basic_type(ctx)?.array_type(*count).into())
-            }
+            Type::StaticArray {
+                element_type,
+                count,
+            } => Some(
+                element_type
+                    .to_llvm_basic_type(ctx)?
+                    .array_type(*count)
+                    .into(),
+            ),
             Type::Bool => Some(BasicTypeEnum::IntType(ctx.bool_type())),
             Type::Struct(struct_type) => Some(BasicTypeEnum::StructType(struct_to_llvm_type(
                 ctx,
@@ -162,7 +245,7 @@ impl Type {
 
     pub fn is_int_type(&self) -> bool {
         match self {
-            Type::Integer(_, _) => true,
+            Type::Integer { .. } => true,
             Type::Bool => true,
             _ => false,
         }
@@ -171,14 +254,14 @@ impl Type {
     pub fn is_ptr_type(&self) -> bool {
         match self {
             Type::RawPtr => true,
-            Type::TypedPtr(_) => true,
+            Type::TypedPtr { .. } => true,
             _ => false,
         }
     }
 
     pub fn is_static_array(&self) -> bool {
         match self {
-            Type::StaticArray(_, _) => true,
+            Type::StaticArray { .. } => true,
             _ => false,
         }
     }
@@ -192,15 +275,15 @@ impl Type {
 
     pub fn is_float_type(&self) -> bool {
         match self {
-            Type::FloatingPoint(_) => true,
+            Type::FloatingPoint { .. } => true,
             _ => false,
         }
     }
 
     pub fn byte_count(&self) -> Option<u32> {
         match self {
-            Type::Integer(_, size) => Some(size.byte_count()),
-            Type::FloatingPoint(size) => Some(size.byte_count()),
+            Type::Integer { is_signed: _, size } => Some(size.byte_count()),
+            Type::FloatingPoint { size } => Some(size.byte_count()),
             _ => None,
         }
     }
@@ -234,19 +317,22 @@ impl Display for Type {
         match self {
             Type::Void => write!(f, "void"),
             Type::RawPtr => write!(f, "rawptr"),
-            Type::TypedPtr(sub_type) => {
+            Type::TypedPtr { inner_type } => {
                 write!(f, "*")?;
-                sub_type.as_ref().fmt(f)
+                inner_type.as_ref().fmt(f)
             }
-            Type::Integer(is_signed, size) => write!(
+            Type::Integer { is_signed, size } => write!(
                 f,
                 "{}{}",
                 if *is_signed { "i" } else { "u" },
                 size.bit_count()
             ),
-            Type::FloatingPoint(size) => write!(f, "f{}", size.bit_count()),
-            Type::StaticArray(sub_type, count) => {
-                sub_type.as_ref().fmt(f)?;
+            Type::FloatingPoint { size } => write!(f, "f{}", size.bit_count()),
+            Type::StaticArray {
+                element_type,
+                count,
+            } => {
+                element_type.as_ref().fmt(f)?;
                 write!(f, "[{}]", *count)
             }
             Type::Bool => write!(f, "bool"),
@@ -302,10 +388,7 @@ macro_rules! visit_type {
 #[macro_export]
 macro_rules! visit_any_type {
     ($loc:expr, $ctx:expr, $x:expr, $y:ident, $z:expr) => {
-        match $x
-            .to_llvm_type($ctx)
-            .to_comp_res_with_desc($loc, "failed to map llvm type")?
-        {
+        match $x {
             AnyTypeEnum::PointerType($y) => $z,
             AnyTypeEnum::IntType($y) => $z,
             AnyTypeEnum::FloatType($y) => $z,

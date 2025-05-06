@@ -277,10 +277,10 @@ impl<'ctx, 'st> FunctionNode {
         if let Some(self_type) = &self.self_type {
             match self_type {
                 Type::Alias(alias) => {
-                    let path = symbol_table
+                    let alias_path = symbol_table
                         .get_identifier_path(path, alias)
                         .to_comp_res(location)?;
-                    Ok(path.sub(&alias.value).sub(&self.name))
+                    Ok(alias_path.sub(&self.name))
                 }
                 _ => compiler_err!(self.location, "invalid type"),
             }
@@ -365,6 +365,7 @@ impl Into<AnyGlobalStatement> for &EnumNode {
 pub struct ImportNode {
     pub location: Location,
     pub module_name: String,
+    pub dst_path: Option<SymbolPath>,
 }
 
 impl LocatedNode for ImportNode {

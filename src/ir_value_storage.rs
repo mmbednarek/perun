@@ -102,10 +102,14 @@ impl<'ctx> IRValueStorage<'ctx> {
     ) -> Option<AnyTypeEnum<'ctx>> {
         let mut path = lookup_path.clone();
 
-        while !path.is_empty() {
+        loop {
             let value_opt = self.global_types.get(&path.sub(name));
             if let Some(value) = value_opt {
                 return Some(*value);
+            }
+
+            if path.is_empty() {
+                break;
             }
             path.truncate_to_parent();
         }

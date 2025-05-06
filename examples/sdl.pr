@@ -45,8 +45,15 @@ pub struct Window {
     handle: rawptr,
 }
 
-pub fn Window.init(ref self, title: rawptr, x: i32, y: i32, w: i32, h: i32, flags: i32) {
-    self.handle = SDL_CreateWindow(title, x, y, w, h, flags);
+import io;
+
+pub fn Window.init(ref self, title: StringRef, x: i32, y: i32, w: i32, h: i32, flags: i32) {
+    io::print("creating window w:");
+    io::print_int(w);
+    io::print("h: ");
+    io::print_int(h);
+    io::print("\n");
+    self.handle = SDL_CreateWindow(title.data, x, y, w, h, flags);
 }
 
 pub fn poll_event(event: rawptr) : i32 {

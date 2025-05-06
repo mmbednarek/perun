@@ -79,7 +79,7 @@ pub enum Weekday {
     Sunday,
 }
 
-pub fn Weekday.to_string(self) : rawptr {
+pub fn Weekday.to_string(self) : StringRef {
     match self {
         Monday { return "Monday"; }
         Tuesday { return "Tuesday"; }

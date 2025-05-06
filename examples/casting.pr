@@ -15,7 +15,7 @@ fn int_log10(in_value: i32) : i32 {
   return count;
 }
 
-pub fn int_to_string(in_value: i32) : rawptr {
+pub fn int_to_string(in_value: i32) : StringRef {
   var x = in_value;
 
   var length = int_log10(in_value);
@@ -37,5 +37,8 @@ pub fn int_to_string(in_value: i32) : rawptr {
     index = index - 1;
   }
 
-  return buff;
+  var result: StringRef;
+  result.data = buff;
+  result.size = length;
+  return result;
 }

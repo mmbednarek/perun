@@ -24,7 +24,7 @@ pub struct SymbolInfo {
     pub location: Location,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SymbolPath {
     path: String,
 }
@@ -116,10 +116,13 @@ impl SymbolTable {
     ) -> SymbolLookupResult<SymbolPath> {
         let mut path = lookup_path.clone();
 
-        while !path.is_empty() {
+        loop {
             let subpath = path.sub(name);
             if self.symbols.contains_key(&subpath) {
                 return Ok(subpath);
+            }
+            if path.is_empty() {
+                break;
             }
             path.truncate_to_parent();
         }
@@ -195,9 +198,16 @@ impl SymbolTable {
                 let symbol = self.find_identifier(path, &alias)?;
                 Ok(symbol.data_type.clone())
             }
-            Type::StaticArray(subtype, count) => {
-                let resolved_subtype = self.resolve_type_alias(path, subtype.as_ref().clone())?;
-                Ok(Type::StaticArray(Box::new(resolved_subtype), count))
+            Type::StaticArray {
+                element_type,
+                count,
+            } => {
+                let resolved_subtype =
+                    self.resolve_type_alias(path, element_type.as_ref().clone())?;
+                Ok(Type::StaticArray {
+                    element_type: Box::new(resolved_subtype),
+                    count,
+                })
             }
             tp => Ok(tp),
         }
@@ -217,7 +227,7 @@ impl SymbolTable {
             }
             sym_path.sub(namespace_sym.name.as_ref())
         } else {
-            path.clone()
+            self.find_symbol_path(path, identifier.value.as_str())?
         })
     }
 

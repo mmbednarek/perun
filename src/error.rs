@@ -1,7 +1,8 @@
 use crate::token::Location;
 use inkwell::builder::BuilderError;
+use std::fmt::{Debug, Display, Formatter};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompilerError {
     pub message: String,
     pub location: Location,
@@ -20,6 +21,7 @@ pub trait CompilerResultErrorMapperWithDesc {
     fn to_comp_res_with_desc(self, loc: Location, desc: &str) -> CompilerResult<Self::Value>;
 }
 
+#[derive(Debug, Clone)]
 pub enum SymbolLookupError {
     AlreadyRegistered(String),
     NoSymbolFound(String),
@@ -93,3 +95,75 @@ impl<T> CompilerResultErrorMapperWithDesc for Option<T> {
         }
     }
 }
+
+pub enum AnyError {
+    CompilerError(CompilerError),
+    SymbolLookupError(SymbolLookupError),
+    FileError(String),
+    SerdeError(String),
+    LLVMError(String),
+}
+
+impl Into<AnyError> for &CompilerError {
+    fn into(self) -> AnyError {
+        AnyError::CompilerError(self.clone())
+    }
+}
+
+impl Into<AnyError> for &SymbolLookupError {
+    fn into(self) -> AnyError {
+        AnyError::SymbolLookupError(self.clone())
+    }
+}
+
+impl Into<AnyError> for &std::io::Error {
+    fn into(self) -> AnyError {
+        AnyError::FileError(self.to_string())
+    }
+}
+
+impl Into<AnyError> for &serde_json::Error {
+    fn into(self) -> AnyError {
+        AnyError::SerdeError(self.to_string())
+    }
+}
+
+impl Into<AnyError> for &BuilderError {
+    fn into(self) -> AnyError {
+        AnyError::LLVMError(self.to_string())
+    }
+}
+
+impl Into<AnyError> for &inkwell::support::LLVMString {
+    fn into(self) -> AnyError {
+        AnyError::LLVMError(self.to_string())
+    }
+}
+
+impl Display for AnyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnyError::CompilerError(ce) => {
+                write!(
+                    f,
+                    "Failed to compile source file [{}]: {}",
+                    ce.location, ce.message
+                )
+            }
+            AnyError::SymbolLookupError(sym) => {
+                write!(f, "Failed to lookup symbol file: {}", sym.message())
+            }
+            AnyError::FileError(err) => {
+                write!(f, "Failed to open file: {}", err)
+            }
+            AnyError::SerdeError(err) => {
+                write!(f, "Failed encode/decode JSON file: {}", err)
+            }
+            AnyError::LLVMError(err) => {
+                write!(f, "Failed to compile LLVM module: {}", err)
+            }
+        }
+    }
+}
+
+pub type AnyResult<T> = Result<T, AnyError>;

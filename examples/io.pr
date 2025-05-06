@@ -5,8 +5,8 @@ extern fn free(ptr: rawptr);
 extern fn fsync(fd: i32): i32;
 extern fn strlen(str: rawptr): i64;
 
-pub fn print(msg: rawptr) {
-  write(1, msg, strlen(msg));
+pub fn print(msg: StringRef) {
+  write(1, msg.data, msg.size);
   fsync(1);
 }
 

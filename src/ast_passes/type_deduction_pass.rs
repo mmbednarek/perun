@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::symbols::{SymbolPath, SymbolTable};
-use crate::typing::{DataSize, Type};
+use crate::typing::{DataSize, Identifier, Type};
 
 pub struct TypeDeductionPass<'st> {
     symbol_table: &'st SymbolTable,
@@ -102,9 +102,15 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
             Ok(pd.expected_type.clone())
         } else {
             if u32::try_from(node.number).is_ok() {
-                Ok(Type::Integer(true, DataSize::Bits32))
+                Ok(Type::Integer {
+                    is_signed: true,
+                    size: DataSize::Bits32,
+                })
             } else {
-                Ok(Type::Integer(true, DataSize::Bits64))
+                Ok(Type::Integer {
+                    is_signed: true,
+                    size: DataSize::Bits64,
+                })
             }
         }
     }
@@ -114,11 +120,16 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
         _: &FloatingPointNode,
         _: &Self::Payload,
     ) -> CompilerResult<Type> {
-        Ok(Type::FloatingPoint(DataSize::Bits64))
+        Ok(Type::FloatingPoint {
+            size: DataSize::Bits64,
+        })
     }
 
     fn visit_string(&self, _: &StringNode, _: &Payload) -> CompilerResult<Type> {
-        Ok(Type::RawPtr)
+        Ok(Type::Alias(Identifier {
+            namespace: None,
+            value: "StringRef".to_string(),
+        }))
     }
 
     fn visit_binary_expression(
@@ -141,7 +152,7 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
                 let expr_type = self.visit_expression(node.expr.as_ref(), pd)?;
                 match expr_type {
                     Type::RawPtr => Ok(pd.expected_type.clone()),
-                    Type::TypedPtr(sub_type) => Ok(sub_type.as_ref().clone()),
+                    Type::TypedPtr { inner_type } => Ok(inner_type.as_ref().clone()),
                     _ => compiler_err!(node.location, "cannot dereference non pointer type"),
                 }
             }
@@ -177,8 +188,8 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
 
         let expr = self.visit_expression(node.object.as_ref(), pd)?;
         match expr {
-            Type::TypedPtr(sub_type) => Ok(sub_type.as_ref().clone()),
-            Type::StaticArray(sub_type, _) => Ok(sub_type.as_ref().clone()),
+            Type::TypedPtr { inner_type } => Ok(inner_type.as_ref().clone()),
+            Type::StaticArray { element_type, .. } => Ok(element_type.as_ref().clone()),
             _ => {
                 compiler_err!(node.location, "invalid object type")
             }

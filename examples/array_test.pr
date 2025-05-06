@@ -3,11 +3,9 @@ import time;
 
 fn main() : i32 {
     var current_time = time::now();
-
     io::print("Today is ");
     io::print(current_time.weekday().to_string());
     io::print("!\n");
-
-    var second_count: time::Seconds = 125;
-    return second_count.minutes();
+    var second_count: time::Days = 3;
+    return second_count.hours().minutes();
 }

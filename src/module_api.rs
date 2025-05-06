@@ -1,3 +1,4 @@
+use crate::typing::Type;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 
@@ -5,34 +6,34 @@ use std::fs::File;
 pub struct FunctionArg {
     pub name: String,
     pub is_ref: bool,
-    pub arg_type: String,
+    pub arg_type: Type,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Function {
     pub name: String,
-    pub receiver: Option<String>,
-    pub return_type: String,
+    pub receiver: Option<Type>,
+    pub return_type: Type,
     pub args: Vec<FunctionArg>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Constant {
     pub name: String,
-    pub const_type: String,
+    pub const_type: Type,
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct StructArg {
+pub struct StructField {
     pub name: String,
-    pub arg_type: String,
+    pub field_type: Type,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Struct {
     pub name: String,
-    pub arguments: Vec<StructArg>,
+    pub fields: Vec<StructField>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,7 +45,7 @@ pub struct Enum {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Alias {
     pub name: String,
-    pub aliased_type: String,
+    pub aliased_type: Type,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

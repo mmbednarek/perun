@@ -161,7 +161,7 @@ impl MathBinaryOperation {
         rhs: BasicValueEnum<'ctx>,
     ) -> CompilerResult<BasicValueBox<'ctx>> {
         match operand_type {
-            Type::Integer(is_signed, _) => {
+            Type::Integer { is_signed, .. } => {
                 let lhs_int = lhs.to_int(location)?;
                 let rhs_int = rhs.to_int(location)?;
 
@@ -169,7 +169,7 @@ impl MathBinaryOperation {
                     location, builder, lhs_int, rhs_int, *is_signed,
                 )?))
             }
-            Type::FloatingPoint(_) => {
+            Type::FloatingPoint { .. } => {
                 let lhs_float = lhs.to_float(location)?;
                 let rhs_float = rhs.to_float(location)?;
 
@@ -208,7 +208,7 @@ impl BinaryOperation {
                 op.build_instruction(*location, &gen.builder, operand_type, lhs, rhs)
             }
             BinaryOperation::Comparison(cmp) => match operand_type {
-                Type::Integer(is_signed, _) => {
+                Type::Integer { is_signed, .. } => {
                     let pred = cmp.to_llvm_int_predicate(*is_signed);
                     let lhs_int = lhs.to_int(*location)?;
                     let rhs_int = rhs.to_int(*location)?;
@@ -218,7 +218,7 @@ impl BinaryOperation {
                             .to_comp_res(*location)?,
                     ))
                 }
-                Type::FloatingPoint(_) => {
+                Type::FloatingPoint { .. } => {
                     let pred = cmp.to_llvm_float_predicate();
                     let lhs_float = lhs.to_float(*location)?;
                     let rhs_float = rhs.to_float(*location)?;
@@ -228,7 +228,7 @@ impl BinaryOperation {
                             .to_comp_res(*location)?,
                     ))
                 }
-                Type::RawPtr | Type::TypedPtr(_) => {
+                Type::RawPtr | Type::TypedPtr { .. } => {
                     let pred = cmp.to_llvm_int_predicate(false);
                     let lhs_ptr = lhs.to_ptr(*location)?;
                     let rhs_ptr = rhs.to_ptr(*location)?;
@@ -423,10 +423,16 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             .to_comp_res_with_desc(location, "invalid target type")?;
 
         match source_type {
-            Type::Integer(src_is_signed, src_data_size) => {
+            Type::Integer {
+                is_signed: src_is_signed,
+                size: src_data_size,
+            } => {
                 let value_int = value.to_int(location)?;
                 match target_type {
-                    Type::Integer(_, dst_data_size) => {
+                    Type::Integer {
+                        is_signed: _,
+                        size: dst_data_size,
+                    } => {
                         if dst_data_size.bit_count() > src_data_size.bit_count() {
                             Ok(Box::new(
                                 if *src_is_signed {
@@ -459,7 +465,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                             Ok(value)
                         }
                     }
-                    Type::FloatingPoint(_) => Ok(Box::new(
+                    Type::FloatingPoint { .. } => Ok(Box::new(
                         if *src_is_signed {
                             self.ir_builder.builder.build_signed_int_to_float(
                                 value_int,
@@ -496,10 +502,15 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                     _ => compiler_err!(location, "invalid cast target type"),
                 }
             }
-            Type::FloatingPoint(src_data_size) => {
+            Type::FloatingPoint {
+                size: src_data_size,
+            } => {
                 let value_float = value.to_float(location)?;
                 match target_type {
-                    Type::Integer(dst_is_signed, _) => Ok(Box::new(
+                    Type::Integer {
+                        is_signed: dst_is_signed,
+                        ..
+                    } => Ok(Box::new(
                         if *dst_is_signed {
                             self.ir_builder.builder.build_float_to_signed_int(
                                 value_float,
@@ -515,7 +526,9 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                         }
                         .to_comp_res(location)?,
                     )),
-                    Type::FloatingPoint(dst_data_size) => {
+                    Type::FloatingPoint {
+                        size: dst_data_size,
+                    } => {
                         if dst_data_size.bit_count() > src_data_size.bit_count() {
                             Ok(Box::new(
                                 self.ir_builder
@@ -544,8 +557,8 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                 }
             }
             Type::Enum(_) => match target_type {
-                Type::Integer(_, data_size) => {
-                    if *data_size == DataSize::Bits32 {
+                Type::Integer { is_signed: _, size } => {
+                    if *size == DataSize::Bits32 {
                         Ok(value)
                     } else {
                         compiler_err!(location, "invalid cast source type")
@@ -732,20 +745,36 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
         path: &SymbolPath,
         src_type: &Type,
     ) -> CompilerResult<AnyTypeEnum<'ctx>> {
-        if let Type::Alias(aliased_type) = src_type {
-            let alias_path = self
-                .ir_builder
-                .symbol_table
-                .get_identifier_path(path, aliased_type)
-                .to_comp_res(*location)?;
-            let resolved_type = self
-                .ir_builder
-                .ir_value_storage
-                .find_global_type(&alias_path, aliased_type.value.as_ref());
-            if let Some(res_type) = resolved_type {
-                return Ok(res_type);
+        match src_type {
+            Type::Alias(aliased_type) => {
+                let alias_path = self
+                    .ir_builder
+                    .symbol_table
+                    .get_identifier_path(path, aliased_type)
+                    .to_comp_res(*location)?;
+                let resolved_type = self
+                    .ir_builder
+                    .ir_value_storage
+                    .find_global_type(&alias_path, aliased_type.value.as_ref());
+                if let Some(res_type) = resolved_type {
+                    return Ok(res_type);
+                }
             }
-        };
+            Type::Struct(struct_type) => {
+                let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
+                for field in &struct_type.fields {
+                    let field_type = self.translate_type(location, path, field)?;
+                    basic_types.push(field_type.to_basic_type().unwrap());
+                }
+
+                return Ok(self
+                    .ir_builder
+                    .context
+                    .struct_type(&basic_types, false)
+                    .into());
+            }
+            _ => {}
+        }
 
         let resolved_type = self
             .ir_builder
@@ -753,13 +782,9 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
             .resolve_type_alias(path, src_type.clone())
             .to_comp_res(*location)?;
 
-        Ok(visit_type!(
-            *location,
-            self.ir_builder.context,
-            &resolved_type,
-            value,
-            Ok(value.into())
-        )?)
+        resolved_type
+            .to_llvm_type(self.ir_builder.context)
+            .to_comp_res_with_desc(*location, "failed to translate type")
     }
 
     pub fn build_get_element_ptr(
@@ -897,11 +922,7 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             }
         }
 
-        let resolved_ret_type = self
-            .ir_builder
-            .symbol_table
-            .resolve_type_alias(path, node.ret_type.clone())
-            .to_comp_res(node.location)?;
+        let resolved_ret_type = self.translate_type(&node.location, path, &node.ret_type)?;
 
         let fn_type = visit_any_type!(
             node.location,
@@ -997,8 +1018,14 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
 
             let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
             for field in &struct_type.fields {
+                let resolved_field = self
+                    .ir_builder
+                    .symbol_table
+                    .resolve_type_alias(path, field.clone())
+                    .to_comp_res(node.location)?;
+
                 basic_types.push(
-                    field
+                    resolved_field
                         .to_llvm_basic_type(self.ir_builder.context)
                         .to_comp_res_with_desc(node.location, "failed to deduce type")?,
                 );
@@ -1027,22 +1054,26 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         )
         .to_comp_res_with_desc(node.location, "unable to load module")?;
 
-        let module_path = SymbolPath::new(node.module_name.as_ref());
+        let module_path = if let Some(dst_path) = &node.dst_path {
+            dst_path.clone()
+        } else {
+            SymbolPath::new(node.module_name.as_ref())
+        };
 
         for struct_node in &module.structs {
             self.visit_struct(struct_node, &module_path)?;
-        }
-        for constant_node in &module.constants {
-            self.visit_const_decl(constant_node, &module_path)?;
-        }
-        for func_node in &module.functions {
-            self.visit_function(func_node, &module_path)?;
         }
         for enum_node in &module.enums {
             self.visit_enum(enum_node, &module_path)?;
         }
         for alias_node in &module.aliases {
             self.visit_alias(alias_node, &module_path)?;
+        }
+        for func_node in &module.functions {
+            self.visit_function(func_node, &module_path)?;
+        }
+        for constant_node in &module.constants {
+            self.visit_const_decl(constant_node, &module_path)?;
         }
 
         Ok(())
@@ -1291,7 +1322,10 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
     fn visit_match_node(&mut self, node: &MatchNode, pd: &Self::Payload) -> CompilerResult<()> {
         let expr_type_unresolved = self.deduce_type(
             pd.path.clone(),
-            Type::Integer(true, DataSize::Bits32),
+            Type::Integer {
+                is_signed: true,
+                size: DataSize::Bits32,
+            },
             node.expression.as_ref(),
         )?;
         let expr_type = self
@@ -1305,7 +1339,10 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
             &ExpressionPayload {
                 path: pd.path.clone(),
                 function: pd.function,
-                expected_type: Type::Integer(true, DataSize::Bits32),
+                expected_type: Type::Integer {
+                    is_signed: true,
+                    size: DataSize::Bits32,
+                },
                 value_type: ValueType::RValue,
             },
         )?;
@@ -1329,7 +1366,10 @@ impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
                 &ExpressionPayload {
                     path: pd.path.clone(),
                     function: pd.function,
-                    expected_type: Type::Integer(true, DataSize::Bits32),
+                    expected_type: Type::Integer {
+                        is_signed: true,
+                        size: DataSize::Bits32,
+                    },
                     value_type: ValueType::RValue,
                 },
             )?;
@@ -1963,7 +2003,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
 
         let index_type = self.deduce_type(
             pd.path.clone(),
-            Type::Integer(false, DataSize::Bits32),
+            Type::Integer {
+                is_signed: false,
+                size: DataSize::Bits32,
+            },
             node.index.as_ref(),
         )?;
         let index_value = self.visit_expression(
@@ -1978,8 +2021,8 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         let index = index_value.as_ref().to_int(node.location)?;
 
         let element_type = match &obj_type {
-            Type::StaticArray(sub_type, _) => sub_type.as_ref().clone(),
-            Type::TypedPtr(sub_type) => sub_type.as_ref().clone(),
+            Type::StaticArray { element_type, .. } => element_type.as_ref().clone(),
+            Type::TypedPtr { inner_type } => inner_type.as_ref().clone(),
             _ => pd.expected_type.clone(),
         };
 
@@ -2179,8 +2222,55 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
         }
     }
 
-    fn visit_constructor(&self, node: &ConstructorNode, pd: &Self::Payload) -> Self::VisitResult {
+    fn visit_constructor(
+        &self,
+        node: &ConstructorNode,
+        pd: &Self::Payload,
+    ) -> CompilerResult<BasicValueBox<'ctx>> {
         assert_eq!(pd.value_type, ValueType::RValue);
-        self.evaluate_compile_time_value(pd.path.clone(), pd.expected_type.clone(), &node.into())
+
+        let expected_type = self
+            .ir_builder
+            .symbol_table
+            .resolve_type_alias(&pd.path, pd.expected_type.clone())
+            .to_comp_res(node.location)?;
+
+        if let Type::Struct(struct_type) = &expected_type {
+            let llvm_type = self.translate_type(&node.location, &pd.path, &expected_type)?;
+
+            if let AnyTypeEnum::StructType(st) = llvm_type {
+                let mut i = 0;
+                let mut dst_struct = st.const_zero();
+                for arg in &node.arguments {
+                    dst_struct = self
+                        .ir_builder
+                        .builder
+                        .build_insert_value(
+                            dst_struct,
+                            self.visit_expression(
+                                arg.as_ref(),
+                                &ExpressionPayload {
+                                    path: pd.path.clone(),
+                                    function: pd.function,
+                                    expected_type: struct_type.fields[i].clone(),
+                                    value_type: ValueType::RValue,
+                                },
+                            )?
+                            .as_basic_value_enum(),
+                            i as u32,
+                            "struct.constr",
+                        )
+                        .to_comp_res(node.location)?
+                        .into_struct_value();
+                    i += 1;
+                }
+
+                Ok(Box::new(dst_struct))
+            } else {
+                compiler_err!(node.location, "invalid constructor type")
+            }
+        } else {
+            self.evaluate_compile_time_value(pd.path.clone(), expected_type, &node.into())
+        }
     }
 }

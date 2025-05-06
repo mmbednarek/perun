@@ -57,10 +57,7 @@ impl Module {
             module.constants.push(ConstDeclNode {
                 location,
                 name: constant.name.clone(),
-                const_type: Some(Type::from_string(
-                    Some(module_core.name.clone()),
-                    constant.const_type.as_ref(),
-                )),
+                const_type: Some(constant.const_type.with_namespace(module.name.as_str())),
                 value: parse_immediate_value(constant.value.as_str())?,
                 is_public: true,
             });
@@ -72,10 +69,7 @@ impl Module {
                 params.push(FunctionArg {
                     location,
                     is_ref: arg.is_ref,
-                    arg_type: Type::from_string(
-                        Some(module_core.name.clone()),
-                        arg.arg_type.as_ref(),
-                    ),
+                    arg_type: arg.arg_type.with_namespace(module.name.as_str()),
                     name: arg.name.clone(),
                 });
             }
@@ -83,19 +77,13 @@ impl Module {
             module.functions.push(FunctionNode {
                 location,
                 self_type: if let Some(rec) = &func.receiver {
-                    Some(Type::from_string(
-                        Some(module_core.name.clone()),
-                        rec.as_ref(),
-                    ))
+                    Some(rec.clone())
                 } else {
                     None
                 },
                 name: func.name.clone(),
                 params,
-                ret_type: Type::from_string(
-                    Some(module_core.name.clone()),
-                    func.return_type.as_ref(),
-                ),
+                ret_type: func.return_type.with_namespace(module.name.as_str()),
                 linkage: FunctionLinkage::Standard,
                 scope: None,
                 is_public: true,
@@ -104,14 +92,11 @@ impl Module {
 
         for struct_value in &module_core.structs {
             let mut fields = Vec::<StructField>::new();
-            for src_field in &struct_value.arguments {
+            for src_field in &struct_value.fields {
                 fields.push(StructField {
                     location,
                     name: src_field.name.clone(),
-                    field_type: Type::from_string(
-                        Some(module_core.name.clone()),
-                        src_field.arg_type.as_ref(),
-                    ),
+                    field_type: src_field.field_type.with_namespace(module.name.as_str()),
                 });
             }
 
@@ -137,10 +122,9 @@ impl Module {
                 location,
                 is_public: true,
                 name: alias_value.name.clone(),
-                aliased_type: Type::from_string(
-                    Some(module_core.name.clone()),
-                    alias_value.aliased_type.as_ref(),
-                ),
+                aliased_type: alias_value
+                    .aliased_type
+                    .with_namespace(module.name.as_str()),
             })
         }
 
@@ -163,14 +147,14 @@ impl Module {
                 arguments.push(crate::module_api::FunctionArg {
                     name: arg.name.clone(),
                     is_ref: arg.is_ref,
-                    arg_type: arg.arg_type.to_string(),
+                    arg_type: arg.arg_type.clone(),
                 });
             }
 
             module.functions.push(crate::module_api::Function {
                 name: func.name.clone(),
-                receiver: func.self_type.clone().map(|t| t.to_string()),
-                return_type: func.ret_type.to_string(),
+                receiver: func.self_type.clone().map(|t| t.clone()),
+                return_type: func.ret_type.clone(),
                 args: arguments,
             })
         }
@@ -181,24 +165,27 @@ impl Module {
                 const_type: constant
                     .const_type
                     .clone()
-                    .unwrap_or(Type::Integer(true, DataSize::Bits32))
-                    .to_string(),
+                    .unwrap_or(Type::Integer {
+                        is_signed: true,
+                        size: DataSize::Bits32,
+                    })
+                    .clone(),
                 value: expression_to_string(&constant.value),
             })
         }
 
         for structure in &self.structs {
-            let mut struct_fields = Vec::<crate::module_api::StructArg>::new();
+            let mut struct_fields = Vec::<crate::module_api::StructField>::new();
             for field in &structure.fields {
-                struct_fields.push(crate::module_api::StructArg {
+                struct_fields.push(crate::module_api::StructField {
                     name: field.name.clone(),
-                    arg_type: field.field_type.to_string(),
+                    field_type: field.field_type.clone(),
                 });
             }
 
             module.structs.push(crate::module_api::Struct {
                 name: structure.name.clone(),
-                arguments: struct_fields,
+                fields: struct_fields,
             });
         }
 
@@ -212,7 +199,7 @@ impl Module {
         for alias_node in &self.aliases {
             module.aliases.push(crate::module_api::Alias {
                 name: alias_node.name.clone(),
-                aliased_type: alias_node.aliased_type.to_string(),
+                aliased_type: alias_node.aliased_type.clone(),
             })
         }
 

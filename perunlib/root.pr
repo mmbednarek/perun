@@ -1,0 +1,6 @@
+pub alias mem_size = u64;
+
+pub struct StringRef {
+    data: rawptr,
+    size: mem_size,
+}

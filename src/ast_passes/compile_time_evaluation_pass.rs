@@ -7,7 +7,7 @@ use crate::symbols::SymbolPath;
 use crate::typing::{DataSize, Type};
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
-use inkwell::values::{FloatValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
 
 pub struct CompileTimeEvaluationPass<'irb, 'ctx, 'st> {
     build_context: &'irb IRBuildContext<'ctx, 'st>,
@@ -60,11 +60,11 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
             &node.into(),
         )?;
 
-        if let Type::Integer(is_signed, data_size) = num_type {
+        if let Type::Integer { is_signed, size } = num_type {
             Ok(Box::new(
                 self.build_context
                     .context
-                    .custom_width_int_type(data_size.bit_count())
+                    .custom_width_int_type(size.bit_count())
                     .const_int(node.number, is_signed),
             ))
         } else {
@@ -84,9 +84,9 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
             &node.into(),
         )?;
 
-        if let Type::FloatingPoint(data_size) = num_type {
+        if let Type::FloatingPoint { size } = num_type {
             Ok(Box::new(
-                match data_size {
+                match size {
                     DataSize::Bits16 => Ok(self.build_context.context.f16_type()),
                     DataSize::Bits32 => Ok(self.build_context.context.f32_type()),
                     DataSize::Bits64 => Ok(self.build_context.context.f64_type()),
@@ -115,7 +115,29 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
             .const_string(node.value.as_bytes(), true);
         global_val.set_initializer(&str_val);
 
-        Ok(Box::new(global_val.as_pointer_value()))
+        let struct_field_types: [BasicTypeEnum<'ctx>; 2] = [
+            self.build_context
+                .context
+                .ptr_type(inkwell::AddressSpace::from(0))
+                .into(),
+            self.build_context.context.i64_type().into(),
+        ];
+
+        let struct_args: [BasicValueEnum<'ctx>; 2] = [
+            global_val.as_pointer_value().into(),
+            self.build_context
+                .context
+                .i64_type()
+                .const_int(node.value.len() as u64, false)
+                .into(),
+        ];
+
+        Ok(Box::new(
+            self.build_context
+                .context
+                .struct_type(struct_field_types.as_slice(), false)
+                .const_named_struct(struct_args.as_slice()),
+        ))
     }
 
     fn visit_binary_expression(
@@ -174,7 +196,10 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
 
     fn visit_constructor(&self, node: &ConstructorNode, pd: &Self::Payload) -> Self::VisitResult {
         match &pd.expected_type {
-            Type::StaticArray(sub_type, count) => {
+            Type::StaticArray {
+                element_type,
+                count,
+            } => {
                 if (*count) != (node.arguments.len() as u32) {
                     return compiler_err!(
                         node.location,
@@ -183,7 +208,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for CompileTimeEvaluationPass<'irb, 'ctx
                     );
                 }
 
-                let llvm_type = sub_type
+                let llvm_type = element_type
                     .to_llvm_basic_type(self.build_context.context)
                     .to_comp_res_with_desc(node.location, "cannot map to llvm_type")?;
 

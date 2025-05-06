@@ -140,6 +140,11 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
+        let import_err_msg = format!(
+            "Import failure, unable to locate module \"{}\"",
+            node.module_name.as_str()
+        );
+
         let module = Module::new(
             &format!(
                 "{}/{}.json",
@@ -148,9 +153,13 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
             ),
             node.location,
         )
-        .to_comp_res_with_desc(node.location, "unable to load module")?;
+        .to_comp_res_with_desc(node.location, import_err_msg.as_str())?;
 
-        let module_path = SymbolPath::new(node.module_name.as_ref());
+        let module_path = if let Some(dst_path) = &node.dst_path {
+            dst_path.clone()
+        } else {
+            SymbolPath::new(node.module_name.as_ref())
+        };
 
         self.symbol_table
             .add_symbol(
@@ -167,17 +176,17 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
         for struct_node in &module.structs {
             self.visit_struct(struct_node, &module_path)?
         }
-        for constant_node in &module.constants {
-            self.visit_const_decl(constant_node, &module_path)?
-        }
-        for func_node in &module.functions {
-            self.visit_function(func_node, &module_path)?;
+        for alias_node in &module.aliases {
+            self.visit_alias(alias_node, &module_path)?;
         }
         for enum_node in &module.enums {
             self.visit_enum(enum_node, &module_path)?;
         }
-        for alias_node in &module.aliases {
-            self.visit_alias(alias_node, &module_path)?;
+        for func_node in &module.functions {
+            self.visit_function(func_node, &module_path)?;
+        }
+        for constant_node in &module.constants {
+            self.visit_const_decl(constant_node, &module_path)?
         }
 
         Ok(())
@@ -222,7 +231,7 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
             .to_comp_res(node.location)
     }
 
-    fn visit_alias(&mut self, node: &AliasNode, path: &SymbolPath) -> Self::VisitResult {
+    fn visit_alias(&mut self, node: &AliasNode, path: &SymbolPath) -> CompilerResult<()> {
         self.symbol_table
             .add_symbol(
                 path,

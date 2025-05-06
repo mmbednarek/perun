@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
+use crate::error::{
+    AnyResult, CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc,
+};
 use crate::ir_value_storage::IRValueStorage;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
 use crate::token::Location;
@@ -112,13 +114,13 @@ pub struct IRBuildContext<'ctx, 'st> {
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
-    pub symbol_table: &'st SymbolTable,
+    pub symbol_table: &'st mut SymbolTable,
     pub ir_value_storage: IRValueStorage<'ctx>,
     pub target_machine: TargetMachine,
 }
 
 impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
-    pub fn new(context: &'ctx Context, symbol_table: &'st SymbolTable) -> Self {
+    pub fn new(context: &'ctx Context, symbol_table: &'st mut SymbolTable) -> Self {
         let module = context.create_module("output");
         let builder = context.create_builder();
         let execution_engine: ExecutionEngine = module
@@ -157,10 +159,10 @@ impl<'ctx, 'st> IRBuildContext<'ctx, 'st> {
         }
     }
 
-    pub fn compile(&self, file: FileType, path: &Path) {
+    pub fn compile(&self, file: FileType, path: &Path) -> AnyResult<()> {
         self.target_machine
             .write_to_file(&self.module, file, path)
-            .unwrap();
+            .map_err(|err| (&err).into())
     }
 
     pub fn build_sext(

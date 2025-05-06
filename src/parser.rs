@@ -387,7 +387,9 @@ where
             }
             TokenType::Operator(OperatorType::Asterisk) => {
                 let sub_type = self.parse_type()?;
-                Ok(Type::TypedPtr(Box::new(sub_type)))
+                Ok(Type::TypedPtr {
+                    inner_type: Box::new(sub_type),
+                })
             }
             _ => {
                 compiler_err!(token.location, "invalid token {:?}", token.token_type)
@@ -401,7 +403,10 @@ where
             if let TokenType::Number(count) = count_tkn.token_type {
                 self.reader
                     .expect_token(TokenType::Operator(OperatorType::RightSquare))?;
-                Ok(Type::StaticArray(Box::new(base_type), count as u32))
+                Ok(Type::StaticArray {
+                    element_type: Box::new(base_type),
+                    count: count as u32,
+                })
             } else {
                 compiler_err!(count_tkn.location, "missing count of array");
             }
@@ -1010,6 +1015,7 @@ where
         Ok(ImportNode {
             location,
             module_name,
+            dst_path: None,
         })
     }
 
