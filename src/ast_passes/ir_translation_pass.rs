@@ -566,6 +566,14 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
                 }
                 _ => compiler_err!(location, "invalid cast source type"),
             },
+            Type::RawPtr => match target_type {
+                Type::TypedPtr { inner_type: _ } => Ok(value),
+                _ => compiler_err!(location, "invalid cast target type"),
+            },
+            Type::TypedPtr { inner_type: _ } => match target_type {
+                Type::RawPtr => Ok(value),
+                _ => compiler_err!(location, "invalid cast target type"),
+            },
             _ => compiler_err!(location, "invalid cast source type"),
         }
     }

@@ -147,7 +147,10 @@ impl<'st> ExpressionVisitor for TypeDeductionPass<'st> {
         pd: &Payload,
     ) -> CompilerResult<Type> {
         match node.operation {
-            SingularOperation::AddressOf => Ok(Type::RawPtr),
+            SingularOperation::AddressOf => {
+                let expr_type = self.visit_expression(node.expr.as_ref(), pd)?;
+                Ok(Type::TypedPtr{inner_type: Box::new(expr_type)})
+            },
             SingularOperation::Deference => {
                 let expr_type = self.visit_expression(node.expr.as_ref(), pd)?;
                 match expr_type {
