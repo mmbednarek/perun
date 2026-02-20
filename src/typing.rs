@@ -33,6 +33,13 @@ pub struct StructType {
 type StructTypeBox = Box<StructType>;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct UnionType {
+    pub fields: Vec<Type>,
+}
+
+type UnionTypeBox = Box<UnionType>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EnumType {
     pub enumerations: BTreeMap<String, i64>,
 }
@@ -74,6 +81,7 @@ pub enum Type {
     Alias(Identifier),
     Function(FuncTypeBox),
     Enum(EnumType),
+    Union(UnionTypeBox),
 }
 
 fn struct_to_llvm_type<'ctx>(
@@ -358,6 +366,13 @@ impl Display for Type {
                 write!(f, "enum {{")?;
                 for (enum_name, index) in &enum_type.enumerations {
                     write!(f, "{} = {},", *enum_name, *index)?;
+                }
+                write!(f, "}}")
+            }
+            Type::Union(union_type) => {
+                write!(f, "union {{")?;
+                for field in &union_type.fields {
+                    write!(f, "{},", field)?;
                 }
                 write!(f, "}}")
             }

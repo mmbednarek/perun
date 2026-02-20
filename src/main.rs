@@ -37,8 +37,11 @@ struct CliArgs {
     #[arg(short, long, default_value_t = ("").to_string())]
     module_out: String,
 
-    #[arg(short, long, default_value_t = (".").to_string())]
-    import_directory: String,
+    #[arg(short, long)]
+    import_directories: Vec<String>,
+
+    #[arg(long, default_value_t = ("").to_string())]
+    module_name: String,
 
     #[arg(short, long, default_value_t = false)]
     run: bool,
@@ -72,8 +75,9 @@ fn main() {
         should_print_ast: args.print_ast,
         should_print_symbols: args.print_symbols,
         should_print_ir: args.print_ir,
-        import_directory: args.import_directory.clone(),
+        import_directories: args.import_directories.clone(),
         no_include_root: args.no_include_root,
+        module_name: if args.module_name.is_empty() { None } else { Some(args.module_name) },
     };
 
     let module_out_path = if args.module_out.is_empty() {

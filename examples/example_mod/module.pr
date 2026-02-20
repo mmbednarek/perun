@@ -1,0 +1,5 @@
+pub import dependent;
+
+pub fn get_number() : i32 {
+    return hello() + 2;
+}

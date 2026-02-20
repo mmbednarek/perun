@@ -3,19 +3,19 @@ use crate::ast_passes::type_deduction_pass::deduce_type;
 use crate::error::{CompilerResult, CompilerResultErrorMapper, CompilerResultErrorMapperWithDesc};
 use crate::module::Module;
 use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
-use crate::typing::{EnumType, FuncType, FuncTypeArg, Identifier, StructType, Type};
+use crate::typing::{EnumType, FuncType, FuncTypeArg, Identifier, StructType, Type, UnionType};
 use std::collections::BTreeMap;
 
-pub struct CollectSymbolsPass<'st> {
+pub struct CollectSymbolsPass<'st, 'id> {
     symbol_table: &'st mut SymbolTable,
-    import_directory: String,
+    import_directories: &'id [String],
 }
 
-impl<'st> CollectSymbolsPass<'st> {
-    pub fn new(symbol_table: &'st mut SymbolTable, import_directory: String) -> Self {
+impl<'st, 'id> CollectSymbolsPass<'st, 'id> {
+    pub fn new(symbol_table: &'st mut SymbolTable, import_directories: &'id [String]) -> Self {
         CollectSymbolsPass {
             symbol_table,
-            import_directory,
+            import_directories,
         }
     }
 
@@ -27,7 +27,7 @@ impl<'st> CollectSymbolsPass<'st> {
     }
 }
 
-impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
+impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st, '_> {
     type Payload = SymbolPath;
     type VisitResult = CompilerResult<()>;
 
@@ -145,27 +145,34 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
             node.module_name.as_str()
         );
 
-        let module = Module::new(
-            &format!(
-                "{}/{}.json",
-                self.import_directory.as_str(),
-                node.module_name
-            ),
-            node.location,
-        )
-        .to_comp_res_with_desc(node.location, import_err_msg.as_str())?;
+        let mut module_opt: Option<Module> = None;
+        for dir in self.import_directories {
+             module_opt = Module::new(
+                &format!(
+                    "{}/{}.json",
+                    dir.as_str(),
+                    node.module_name
+                ),
+                node.location,
+            );
+            if module_opt.is_some() {
+                break;
+            }
+        }
+
+        let module: Module = module_opt.to_comp_res_with_desc(node.location, import_err_msg.as_str())?;
 
         let module_path = if let Some(dst_path) = &node.dst_path {
             dst_path.clone()
         } else {
-            SymbolPath::new(node.module_name.as_ref())
+            SymbolPath::new(module.name.as_str())
         };
 
         self.symbol_table
             .add_symbol(
                 &SymbolPath::empty(),
                 SymbolInfo {
-                    name: node.module_name.clone(),
+                    name: module.name.clone(),
                     sym_type: SymbolType::Namespace,
                     data_type: Type::Void,
                     location: node.location,
@@ -244,6 +251,25 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st> {
             )
             .to_comp_res(node.location)
     }
+
+    fn visit_union(&mut self, node: &UnionNode, path: &SymbolPath) -> CompilerResult<()> {
+        let fields: Vec<Type> = node
+            .fields
+            .iter()
+            .map(|field| field.field_type.clone())
+            .collect();
+        let union_type = UnionType { fields };
+        let symbol = SymbolInfo {
+            name: node.name.clone(),
+            sym_type: SymbolType::TypeDef,
+            data_type: Type::Union(Box::new(union_type)),
+            location: node.location,
+        };
+        self.symbol_table
+            .add_symbol(path, symbol)
+            .to_comp_res(node.location)?;
+        Ok(())
+    }
 }
 
 impl VarDeclNode {
@@ -259,7 +285,7 @@ impl VarDeclNode {
     }
 }
 
-impl<'st> StatementVisitor for CollectSymbolsPass<'st> {
+impl<'st> StatementVisitor for CollectSymbolsPass<'st, '_> {
     type Payload = SymbolPath;
     type VisitResult = CompilerResult<()>;
 

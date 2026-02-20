@@ -1,7 +1,4 @@
-use crate::ast::{
-    AliasNode, AnyExpressionNode, ConstDeclNode, EnumNode, ExpressionBox, FunctionArg,
-    FunctionLinkage, FunctionNode, StructField, StructNode,
-};
+use crate::ast::{AliasNode, AnyExpressionNode, ConstDeclNode, EnumNode, ExpressionBox, FunctionArg, FunctionLinkage, FunctionNode, StructField, StructNode, UnionNode};
 use crate::lexer::Lexer;
 use crate::module_api::{load_module, ModuleCore};
 use crate::parser::Parser;
@@ -16,6 +13,7 @@ pub struct Module {
     pub structs: Vec<StructNode>,
     pub enums: Vec<EnumNode>,
     pub aliases: Vec<AliasNode>,
+    pub unions: Vec<UnionNode>,
 }
 
 fn expression_to_string(expr: &AnyExpressionNode) -> String {
@@ -51,6 +49,7 @@ impl Module {
             structs: Vec::new(),
             enums: Vec::new(),
             aliases: Vec::new(),
+            unions: Vec::new(),
         };
 
         for constant in &module_core.constants {

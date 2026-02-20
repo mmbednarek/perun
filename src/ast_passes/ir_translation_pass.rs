@@ -276,16 +276,19 @@ impl<'ctx> AnyTypeEnumUtil<'ctx> for AnyTypeEnum<'ctx> {
     }
 }
 
-pub struct IRTranslationPass<'irb, 'ctx, 'st> {
+pub struct IRTranslationPass<'irb, 'ctx, 'st, 'id> {
     ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
-    import_directory: String,
+    import_directories: &'id [String],
 }
 
-impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
-    pub fn new(ir_builder: &'irb mut IRBuildContext<'ctx, 'st>, import_directory: String) -> Self {
+impl<'irb, 'ctx, 'st, 'id> IRTranslationPass<'irb, 'ctx, 'st, 'id> {
+    pub fn new(
+        ir_builder: &'irb mut IRBuildContext<'ctx, 'st>,
+        import_directories: &'id [String],
+    ) -> Self {
         Self {
             ir_builder,
-            import_directory,
+            import_directories,
         }
     }
 
@@ -881,7 +884,7 @@ impl<'irb, 'ctx, 'st> IRTranslationPass<'irb, 'ctx, 'st> {
     }
 }
 
-impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
+impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, 'st, '_> {
     type Payload = SymbolPath;
     type VisitResult = CompilerResult<()>;
 
@@ -1052,20 +1055,23 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
     }
 
     fn visit_import(&mut self, node: &ImportNode, _: &SymbolPath) -> CompilerResult<()> {
-        let module = Module::new(
-            &format!(
-                "{}/{}.json",
-                self.import_directory.as_str(),
-                node.module_name
-            ),
-            node.location,
-        )
-        .to_comp_res_with_desc(node.location, "unable to load module")?;
+        let mut module_opt: Option<Module> = None;
+        for dir in self.import_directories {
+            module_opt = Module::new(
+                &format!("{}/{}.json", dir.as_str(), node.module_name),
+                node.location,
+            );
+            if module_opt.is_some() {
+                break;
+            }
+        }
+
+        let module: Module = module_opt.to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = if let Some(dst_path) = &node.dst_path {
             dst_path.clone()
         } else {
-            SymbolPath::new(node.module_name.as_ref())
+            SymbolPath::new(module.name.as_str())
         };
 
         for struct_node in &module.structs {
@@ -1103,6 +1109,10 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
         // nothing to do
         Ok(())
     }
+
+    fn visit_union(&mut self, node: &UnionNode, pd: &Self::Payload) -> Self::VisitResult {
+        Ok(())
+    }
 }
 
 pub struct StatementPayload<'ctx> {
@@ -1110,7 +1120,7 @@ pub struct StatementPayload<'ctx> {
     function: FunctionValue<'ctx>,
 }
 
-impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
+impl<'irb, 'ctx, 'st> StatementVisitor for IRTranslationPass<'irb, 'ctx, 'st, '_> {
     type Payload = StatementPayload<'ctx>;
     type VisitResult = CompilerResult<()>;
 
@@ -1456,7 +1466,7 @@ pub struct ExpressionPayload<'ctx> {
 
 pub type BasicValueBox<'ctx> = Box<dyn BasicValue<'ctx> + 'ctx>;
 
-impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st> {
+impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st, '_> {
     type Payload = ExpressionPayload<'ctx>;
     type VisitResult = CompilerResult<BasicValueBox<'ctx>>;
 

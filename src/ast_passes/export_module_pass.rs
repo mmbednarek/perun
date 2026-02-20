@@ -1,12 +1,14 @@
 use crate::ast::*;
+use crate::error::CompilerResultErrorMapperWithDesc;
 use crate::module::Module;
 
-pub struct ExportModulePass {
+pub struct ExportModulePass<'a> {
     pub module: Module,
+    pub import_directories: &'a [String],
 }
 
-impl ExportModulePass {
-    pub fn new(module_name: String) -> Self {
+impl<'id> ExportModulePass<'id> {
+    pub fn new(module_name: String, import_directories: &'id [String]) -> Self {
         Self {
             module: Module {
                 name: module_name,
@@ -15,12 +17,14 @@ impl ExportModulePass {
                 structs: vec![],
                 enums: vec![],
                 aliases: vec![],
+                unions: vec![],
             },
+            import_directories,
         }
     }
 }
 
-impl GlobalStatementVisitor for ExportModulePass {
+impl GlobalStatementVisitor for ExportModulePass<'_> {
     type Payload = ();
     type VisitResult = ();
 
@@ -48,7 +52,42 @@ impl GlobalStatementVisitor for ExportModulePass {
         }
     }
 
-    fn visit_import(&mut self, _: &ImportNode, _: &Self::Payload) -> Self::VisitResult {}
+    fn visit_import(&mut self, node: &ImportNode, _: &Self::Payload) -> Self::VisitResult {
+        if !node.is_public {
+            return;
+        }
+
+        let mut opt_module: Option<Module> = None;
+        for path in self.import_directories {
+            opt_module = Module::new(
+                &format!("{}/{}.json", path.as_str(), node.module_name).as_str(),
+                node.location,
+            );
+            if opt_module.is_some() {
+                break;
+            }
+        }
+        let module = opt_module.unwrap();
+
+        for alias in module.aliases {
+            self.module.aliases.push(alias);
+        }
+        for constant in module.constants {
+            self.module.constants.push(constant);
+        }
+        for func in module.functions {
+            self.module.functions.push(func);
+        }
+        for struct_node in module.structs {
+            self.module.structs.push(struct_node);
+        }
+        for enum_node in module.enums {
+            self.module.enums.push(enum_node);
+        }
+        for union_node in module.unions {
+            self.module.unions.push(union_node);
+        }
+    }
 
     fn visit_enum(&mut self, node: &EnumNode, _: &Self::Payload) -> Self::VisitResult {
         if node.is_public {
@@ -59,6 +98,12 @@ impl GlobalStatementVisitor for ExportModulePass {
     fn visit_alias(&mut self, node: &AliasNode, _: &Self::Payload) -> Self::VisitResult {
         if node.is_public {
             self.module.aliases.push(node.clone());
+        }
+    }
+
+    fn visit_union(&mut self, node: &UnionNode, _: &Self::Payload) -> Self::VisitResult {
+        if node.is_public {
+            self.module.unions.push(node.clone());
         }
     }
 }

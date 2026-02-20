@@ -1,12 +1,16 @@
 .PHONY: all clean
 
 BUILD_DIR=../build-dir
+BUILD_DIR_EXAMPLE_MOD=../build-dir/example_mod
 PERUNC="./../target/debug/perun"
 
 all: $(BUILD_DIR)/snake $(BUILD_DIR)/linked_list
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR_EXAMPLE_MOD): $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR_EXAMPLE_MOD)
 
 $(BUILD_DIR)/linked_list.o: $(BUILD_DIR) linked_list.pr
 	$(PERUNC) linked_list.pr -o $(BUILD_DIR)/linked_list.o -i $(BUILD_DIR)
@@ -31,6 +35,21 @@ $(BUILD_DIR)/random.o $(BUILD_DIR)/random.json: $(BUILD_DIR) random.pr
 
 $(BUILD_DIR)/snake.o: $(BUILD_DIR) snake.pr $(BUILD_DIR)/random.json $(BUILD_DIR)/mem.json $(BUILD_DIR)/sdl.json $(BUILD_DIR)/io.json
 	$(PERUNC) snake.pr -o $(BUILD_DIR)/snake.o -i $(BUILD_DIR)
+
+$(BUILD_DIR_EXAMPLE_MOD)/dependent.o $(BUILD_DIR_EXAMPLE_MOD)/dependent.json: $(BUILD_DIR_EXAMPLE_MOD) example_mod/dependent.pr
+	$(PERUNC) example_mod/dependent.pr -o $(BUILD_DIR_EXAMPLE_MOD)/dependent.o -m $(BUILD_DIR_EXAMPLE_MOD)/dependent.json  -i $(BUILD_DIR) -i $(BUILD_DIR_EXAMPLE_MOD) --module-name example_mod
+
+$(BUILD_DIR_EXAMPLE_MOD)/module.o $(BUILD_DIR)/example_mod.json: $(BUILD_DIR_EXAMPLE_MOD) example_mod/module.pr  $(BUILD_DIR_EXAMPLE_MOD)/dependent.json
+	$(PERUNC) example_mod/module.pr -o $(BUILD_DIR_EXAMPLE_MOD)/module.o -m $(BUILD_DIR)/example_mod.json -i $(BUILD_DIR) -i $(BUILD_DIR_EXAMPLE_MOD) --module-name example_mod
+
+$(BUILD_DIR)/example_mod.a: $(BUILD_DIR_EXAMPLE_MOD)/dependent.o $(BUILD_DIR_EXAMPLE_MOD)/module.o
+	ld -shared -o $(BUILD_DIR)/example_mod.a $(BUILD_DIR_EXAMPLE_MOD)/dependent.o $(BUILD_DIR_EXAMPLE_MOD)/module.o
+
+$(BUILD_DIR)/module_test.o: $(BUILD_DIR) module_test.pr $(BUILD_DIR)/example_mod.a $(BUILD_DIR)/example_mod.json
+	$(PERUNC) module_test.pr -o $(BUILD_DIR)/module_test.o -i $(BUILD_DIR)
+
+$(BUILD_DIR)/module_test: $(BUILD_DIR) $(BUILD_DIR)/module_test.o $(BUILD_DIR)/example_mod.a
+	gcc $(BUILD_DIR)/module_test.o $(BUILD_DIR)/example_mod.a -o $(BUILD_DIR)/module_test
 
 $(BUILD_DIR)/snake: $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o $(BUILD_DIR)/random.o $(BUILD_DIR)/mem.o
 	gcc $(BUILD_DIR)/snake.o $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/sdl.o $(BUILD_DIR)/random.o $(BUILD_DIR)/mem.o -lSDL2 -o $(BUILD_DIR)/snake

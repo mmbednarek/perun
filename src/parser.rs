@@ -194,7 +194,7 @@ where
                     }
                     Keyword::Import => {
                         let import_node: GlobalStatementBox =
-                            Box::new((&self.parse_import(location)?).into());
+                            Box::new((&self.parse_import(location, is_public)?).into());
                         result.body.push(import_node);
                     }
                     Keyword::Enum => {
@@ -206,6 +206,11 @@ where
                         let alias_node: GlobalStatementBox =
                             Box::new((&self.parse_alias(location, is_public)?).into());
                         result.body.push(alias_node);
+                    }
+                    Keyword::Union => {
+                        let union_node: GlobalStatementBox =
+                            Box::new((&self.parse_union(location, is_public)?).into());
+                        result.body.push(union_node);
                     }
                     Keyword::Public => {
                         is_public = true;
@@ -1008,7 +1013,43 @@ where
         })
     }
 
-    fn parse_import(&mut self, location: Location) -> CompilerResult<ImportNode> {
+    fn parse_union(&mut self, location: Location, is_public: bool) -> CompilerResult<UnionNode> {
+        let name = self.reader.expect_identifier()?;
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::LeftBrace))?;
+
+        let mut fields = Vec::new();
+        loop {
+            let peek = self.reader.peek()?.clone();
+            if peek.token_type == TokenType::Operator(OperatorType::RightBrace) {
+                break;
+            }
+
+            let field_name = self.reader.expect_identifier()?;
+            self.reader
+                .expect_token(TokenType::Operator(OperatorType::Colon))?;
+
+            let field_type = self.parse_type()?;
+
+            fields.push(StructField {
+                location: peek.location,
+                name: field_name,
+                field_type,
+            });
+
+            self.reader
+                .skip_token_if_present(TokenType::Operator(OperatorType::Comma))?;
+        }
+
+        Ok(UnionNode {
+            location,
+            name,
+            fields,
+            is_public,
+        })
+    }
+
+    fn parse_import(&mut self, location: Location, is_public: bool) -> CompilerResult<ImportNode> {
         let module_name = self.reader.expect_identifier()?;
         self.reader
             .expect_token(TokenType::Operator(OperatorType::Semicolon))?;
@@ -1016,6 +1057,7 @@ where
             location,
             module_name,
             dst_path: None,
+            is_public,
         })
     }
 

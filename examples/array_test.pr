@@ -1,11 +1,21 @@
 import io;
-import time;
+
+union Example {
+    int_val: i32,
+    float_val: f32,
+}
 
 fn main() : i32 {
-    var current_time = time::now();
-    io::print("Today is ");
-    io::print(current_time.weekday().to_string());
-    io::print("!\n");
-    var second_count: time::Days = 3;
-    return second_count.hours().minutes();
+    var ex = Example::int_val(16);
+
+    match ex {
+        int_val(value) {
+            io::print("Int value!\n");
+        }
+        float_val(value) {
+            io::print("Float value!\n");
+        }
+    }
+
+    return 0;
 }

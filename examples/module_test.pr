@@ -1,0 +1,5 @@
+import example_mod;
+
+fn main() : i32 {
+    return example_mod::get_number();
+}

@@ -17,7 +17,8 @@ pub struct Compiler {
     pub should_print_symbols: bool,
     pub should_print_ir: bool,
     pub no_include_root: bool,
-    pub import_directory: String,
+    pub import_directories: Vec<String>,
+    pub module_name: Option<String>,
 }
 
 impl Compiler {
@@ -50,17 +51,23 @@ impl Compiler {
             println!("{:#?}", parsed);
         }
 
-        let basename = source_path
-            .file_stem()
-            .unwrap_or(OsStr::new("root"))
-            .to_str()
-            .unwrap_or("root");
-        let path = SymbolPath::new(basename);
+        let module_name = self.module_name.clone().unwrap_or(
+            source_path
+                .file_stem()
+                .unwrap_or(OsStr::new("root"))
+                .to_str()
+                .unwrap_or("root")
+                .to_string(),
+        );
+        let path = SymbolPath::new(module_name.as_str());
 
         if let Some(module_out_path) = module_out {
             let module_file = File::create(&module_out_path).map_err(|io_err| (&io_err).into())?;
 
-            let mut pass = ast_passes::export_module_pass::ExportModulePass::new(basename.into());
+            let mut pass = ast_passes::export_module_pass::ExportModulePass::new(
+                module_name,
+                self.import_directories.as_slice(),
+            );
             pass.visit_global_statement(&(&parsed).into(), &());
 
             let module_api = pass.module.to_api();
@@ -70,13 +77,14 @@ impl Compiler {
 
         let mut symbols_pass = ast_passes::collect_symbols_pass::CollectSymbolsPass::new(
             &mut build_ctx.symbol_table,
-            self.import_directory.clone(),
+            self.import_directories.as_slice(),
         );
 
         let import_node = ImportNode {
             location: Location { line: 0, column: 0 },
             module_name: "root".into(),
             dst_path: Some(SymbolPath::empty()),
+            is_public: false,
         };
         if !self.no_include_root {
             symbols_pass
@@ -93,7 +101,7 @@ impl Compiler {
 
         let mut translation_pass = ast_passes::ir_translation_pass::IRTranslationPass::new(
             build_ctx,
-            self.import_directory.clone(),
+            self.import_directories.as_slice(),
         );
 
         if !self.no_include_root {
