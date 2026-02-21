@@ -1,0 +1,13 @@
+module util;
+
+pub fn offset_ptr!"offset_ptr"(in_ptr: rawptr, offset: i64) : rawptr;
+
+pub fn count_chars(data: *i8) : mem_size {
+    var count: mem_size = 0;
+    var ch: i8 = *data;
+    while ch != 0 {
+        count += 1;
+        ch = *offset_ptr(data, count);
+    }
+    return count;
+}

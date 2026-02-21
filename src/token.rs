@@ -185,6 +185,7 @@ pub enum Keyword {
     Match,
     Alias,
     Union,
+    Module,
 }
 
 impl Keyword {
@@ -223,6 +224,7 @@ impl Keyword {
             "match" => Some(Keyword::Match),
             "alias" => Some(Keyword::Alias),
             "union" => Some(Keyword::Union),
+            "module" => Some(Keyword::Module),
             _ => None,
         }
     }

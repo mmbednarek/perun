@@ -1,0 +1,14 @@
+import posix;
+import util;
+
+fn main(ref init: InitInfo) : ExitStatus {
+    posix::write(posix::STDOUT_FD, "Passed Arguments\n", 6);
+    var i = 0;
+    while i < init.arg_count {
+        var line: *i8 = *util::offset_ptr(init.args, i * 8);
+        posix::write(posix::STDOUT_FD, line, util::count_chars(line));
+        posix::write(posix::STDOUT_FD, "\n", 6);
+        i += 1;
+    }
+    return ExitStatus::Success;
+}

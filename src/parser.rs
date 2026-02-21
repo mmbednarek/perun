@@ -212,6 +212,16 @@ where
                             Box::new((&self.parse_union(location, is_public)?).into());
                         result.body.push(union_node);
                     }
+                    Keyword::Module => {
+                        compiler_expect!(
+                            !is_public,
+                            location,
+                            "invalid pub statement before module"
+                        );
+                        let module_node: GlobalStatementBox =
+                            Box::new((&self.parse_module(location)?).into());
+                        result.body.push(module_node);
+                    }
                     Keyword::Public => {
                         is_public = true;
                         continue;
@@ -251,6 +261,21 @@ where
         } else {
             suggested_linkage
         };
+
+        let mut symbol_override: Option<String> = None;
+        let peek = self.reader.peek()?.clone();
+        if peek.token_type == TokenType::Operator(OperatorType::Not) {
+            self.reader.next()?;
+            let override_token = self.reader.next()?;
+            match &override_token.token_type {
+                TokenType::String(symbol) => {
+                    symbol_override = Some(symbol.clone());
+                }
+                _ => {
+                    compiler_expect!(false, peek.location.clone(), "expected string type");
+                }
+            };
+        }
 
         self.reader
             .expect_token(TokenType::Operator(OperatorType::LeftParen))?;
@@ -356,6 +381,7 @@ where
             ret_type,
             linkage,
             scope,
+            symbol_override,
             is_public,
         })
     }
@@ -1138,5 +1164,12 @@ where
             name,
             aliased_type,
         })
+    }
+
+    fn parse_module(&mut self, location: Location) -> CompilerResult<ModuleNode> {
+        let name = self.reader.expect_identifier()?;
+        self.reader
+            .expect_token(TokenType::Operator(OperatorType::Semicolon))?;
+        Ok(ModuleNode { location, name })
     }
 }

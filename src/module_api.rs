@@ -15,6 +15,7 @@ pub struct Function {
     pub receiver: Option<Type>,
     pub return_type: Type,
     pub args: Vec<FunctionArg>,
+    pub symbol_override: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -1,0 +1,39 @@
+build_dir = ../build-dir
+obj_out = ${build_dir}/obj
+lib_out = ${build_dir}/lib
+mod_out = ${build_dir}/mod
+platform = unix
+arch = amd64
+
+rule make_dir
+    command = mkdir -p $out
+
+rule perun
+    command = ../target/debug/perun ${in} -o ${out} -m ${mod} -i ${mod_out} ${flags}
+
+rule link_static
+    command = ar rcs ${out} ${in}
+
+rule asm
+    command = as $in -o $out
+
+build ${mod_out}: make_dir
+
+build ${obj_out}/root.o: perun root.pr | ${mod_out}
+    mod = ${mod_out}/root.json
+    flags = --no-include-root
+
+build ${obj_out}/posix.o: perun posix.pr | ${mod_out}
+    mod = ${mod_out}/posix.json
+
+build ${obj_out}/setup.o: perun setup.pr | ${mod_out} ${obj_out}/posix.o
+    mod = ${mod_out}/setup.json
+
+build ${obj_out}/util.o: perun util.pr | ${mod_out} ${obj_out}/root.o
+    mod = ${mod_out}/util.json
+
+build ${obj_out}/start.o: asm platform/${platform}/asm/${arch}/start.s
+build ${obj_out}/syscall.o: asm platform/${platform}/asm/${arch}/syscall.s
+build ${obj_out}/util-asm.o: asm platform/${platform}/asm/${arch}/util.s
+
+build ${lib_out}/perunlib.a: link_static ${obj_out}/root.o ${obj_out}/setup.o ${obj_out}/start.o ${obj_out}/syscall.o ${obj_out}/util-asm.o ${obj_out}/util.o

@@ -167,3 +167,17 @@ impl Display for AnyError {
 }
 
 pub type AnyResult<T> = Result<T, AnyError>;
+
+pub fn expect(condition: bool, location: Location, message: String) -> CompilerResult<()> {
+    if condition {
+        Ok(())
+    } else {
+        Err(CompilerError{message, location})
+    }
+}
+#[macro_export]
+macro_rules! compiler_expect {
+    ($cond:expr, $loc:expr, $($args:expr), *) => {{
+        $crate::error::expect($cond, $loc, format!($($args), *))?
+    }}
+}

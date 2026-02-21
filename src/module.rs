@@ -85,6 +85,7 @@ impl Module {
                 ret_type: func.return_type.with_namespace(module.name.as_str()),
                 linkage: FunctionLinkage::Standard,
                 scope: None,
+                symbol_override: func.symbol_override.clone(),
                 is_public: true,
             });
         }
@@ -155,6 +156,7 @@ impl Module {
                 receiver: func.self_type.clone().map(|t| t.clone()),
                 return_type: func.ret_type.clone(),
                 args: arguments,
+                symbol_override: func.symbol_override.clone(),
             })
         }
 

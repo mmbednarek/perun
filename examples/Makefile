@@ -69,5 +69,11 @@ $(BUILD_DIR)/time.o $(BUILD_DIR)/time.json: $(BUILD_DIR) time.pr
 $(BUILD_DIR)/array_test: $(BUILD_DIR)/array_test.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/io.o $(BUILD_DIR)/time.o
 	gcc $(BUILD_DIR)/array_test.o  $(BUILD_DIR)/io.o $(BUILD_DIR)/casting.o $(BUILD_DIR)/time.o -o $(BUILD_DIR)/array_test
 
+$(BUILD_DIR)/nolibc_example.o: $(BUILD_DIR) nolibc_example.pr
+	$(PERUNC) nolibc_example.pr -o $(BUILD_DIR)/nolibc_example.o -i $(BUILD_DIR)/mod
+
+$(BUILD_DIR)/nolibc_example: $(BUILD_DIR)/nolibc_example.o $(BUILD_DIR)/lib/perunlib.a
+	ld $(BUILD_DIR)/nolibc_example.o $(BUILD_DIR)/lib/perunlib.a -o $(BUILD_DIR)/nolibc_example
+
 clean:
 	rm -rf build-dir

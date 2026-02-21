@@ -1,6 +1,18 @@
+module root;
+
 pub alias mem_size = u64;
 
 pub struct StringRef {
     data: rawptr,
     size: mem_size,
+}
+
+pub struct InitInfo {
+    arg_count: u64,
+    args: **u8,
+}
+
+pub enum ExitStatus {
+    Success,
+    Failure,
 }

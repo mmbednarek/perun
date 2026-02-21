@@ -264,6 +264,7 @@ pub struct FunctionNode {
     pub ret_type: Type,
     pub linkage: FunctionLinkage,
     pub scope: Option<ScopeNode>,
+    pub symbol_override: Option<String>,
     pub is_public: bool,
 }
 
@@ -294,6 +295,10 @@ impl<'ctx, 'st> FunctionNode {
 
     pub fn effective_name(&self, path: &SymbolPath) -> String {
         assert!(!path.is_empty());
+        if let Some(symbol) = &self.symbol_override {
+            return symbol.clone();
+        }
+
         match self.linkage {
             FunctionLinkage::Standard => format!("perun.fn.{}", path.to_string()),
             FunctionLinkage::External => path.to_string(),
@@ -422,6 +427,24 @@ impl Into<AnyGlobalStatement> for &UnionNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct ModuleNode {
+    pub location: Location,
+    pub name: String,
+}
+
+impl LocatedNode for ModuleNode {
+    fn get_location(&self) -> &Location {
+        &self.location
+    }
+}
+
+impl Into<AnyGlobalStatement> for &ModuleNode {
+    fn into(self) -> AnyGlobalStatement {
+        AnyGlobalStatement::Module(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum AnyGlobalStatement {
     SourceUnit(SourceUnit),
     ConstDecl(ConstDeclNode),
@@ -431,6 +454,7 @@ pub enum AnyGlobalStatement {
     Enum(EnumNode),
     Alias(AliasNode),
     Union(UnionNode),
+    Module(ModuleNode),
 }
 
 pub trait GlobalStatementVisitor {
@@ -445,6 +469,7 @@ pub trait GlobalStatementVisitor {
     fn visit_enum(&mut self, node: &EnumNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_alias(&mut self, node: &AliasNode, pd: &Self::Payload) -> Self::VisitResult;
     fn visit_union(&mut self, node: &UnionNode, pd: &Self::Payload) -> Self::VisitResult;
+    fn visit_module(&mut self, node: &ModuleNode, pd: &Self::Payload) -> Self::VisitResult;
 
     fn visit_global_statement(
         &mut self,
@@ -460,6 +485,7 @@ pub trait GlobalStatementVisitor {
             AnyGlobalStatement::Enum(node) => self.visit_enum(node, pd),
             AnyGlobalStatement::Alias(node) => self.visit_alias(node, pd),
             AnyGlobalStatement::Union(node) => self.visit_union(node, pd),
+            AnyGlobalStatement::Module(node) => self.visit_module(node, pd),
         }
     }
 }

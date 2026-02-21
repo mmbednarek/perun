@@ -1066,7 +1066,8 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
             }
         }
 
-        let module: Module = module_opt.to_comp_res_with_desc(node.location, "unable to load module")?;
+        let module: Module =
+            module_opt.to_comp_res_with_desc(node.location, "unable to load module")?;
 
         let module_path = if let Some(dst_path) = &node.dst_path {
             dst_path.clone()
@@ -1111,6 +1112,10 @@ impl<'irb, 'ctx, 'st> GlobalStatementVisitor for IRTranslationPass<'irb, 'ctx, '
     }
 
     fn visit_union(&mut self, node: &UnionNode, pd: &Self::Payload) -> Self::VisitResult {
+        Ok(())
+    }
+
+    fn visit_module(&mut self, node: &ModuleNode, pd: &Self::Payload) -> Self::VisitResult {
         Ok(())
     }
 }

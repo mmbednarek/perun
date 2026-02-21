@@ -106,4 +106,8 @@ impl GlobalStatementVisitor for ExportModulePass<'_> {
             self.module.unions.push(node.clone());
         }
     }
+
+    fn visit_module(&mut self, node: &ModuleNode, _: &Self::Payload) -> Self::VisitResult {
+        self.module.name = node.name.to_string();
+    }
 }

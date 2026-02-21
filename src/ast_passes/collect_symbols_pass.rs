@@ -147,12 +147,8 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st, '_> {
 
         let mut module_opt: Option<Module> = None;
         for dir in self.import_directories {
-             module_opt = Module::new(
-                &format!(
-                    "{}/{}.json",
-                    dir.as_str(),
-                    node.module_name
-                ),
+            module_opt = Module::new(
+                &format!("{}/{}.json", dir.as_str(), node.module_name),
                 node.location,
             );
             if module_opt.is_some() {
@@ -160,7 +156,8 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st, '_> {
             }
         }
 
-        let module: Module = module_opt.to_comp_res_with_desc(node.location, import_err_msg.as_str())?;
+        let module: Module =
+            module_opt.to_comp_res_with_desc(node.location, import_err_msg.as_str())?;
 
         let module_path = if let Some(dst_path) = &node.dst_path {
             dst_path.clone()
@@ -268,6 +265,11 @@ impl<'st> GlobalStatementVisitor for CollectSymbolsPass<'st, '_> {
         self.symbol_table
             .add_symbol(path, symbol)
             .to_comp_res(node.location)?;
+        Ok(())
+    }
+
+    fn visit_module(&mut self, _: &ModuleNode, _: &Self::Payload) -> Self::VisitResult {
+        // nothing to do
         Ok(())
     }
 }
