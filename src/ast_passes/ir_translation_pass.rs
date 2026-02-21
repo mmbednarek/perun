@@ -5,15 +5,16 @@ use crate::ir_build_context::{BasicValueExtension, IRBuildContext};
 use crate::module::Module;
 use crate::symbols::{SymbolPath, SymbolType};
 use crate::token::Location;
+use crate::typing::DataSize::Bits64;
 use crate::typing::{DataSize, FuncTypeBox, Type, ValueType};
 use either::Either;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Linkage;
-use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatMathValue, FunctionValue,
-    IntMathValue, IntValue, PointerValue,
+    IntMathValue, IntValue, PointerValue, StructValue,
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
@@ -782,6 +783,17 @@ impl<'irb, 'ctx, 'st, 'id> IRTranslationPass<'irb, 'ctx, 'st, 'id> {
                     .ir_builder
                     .context
                     .struct_type(&basic_types, false)
+                    .into());
+            }
+            Type::StaticArray {
+                element_type,
+                count,
+            } => {
+                let tp = self.translate_type(location, path, element_type)?;
+                return Ok(tp
+                    .to_basic_type()
+                    .to_comp_res_with_desc(*location, "couldn't create array type")?
+                    .array_type(*count)
                     .into());
             }
             _ => {}
@@ -2046,6 +2058,7 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st, '
         let element_type = match &obj_type {
             Type::StaticArray { element_type, .. } => element_type.as_ref().clone(),
             Type::TypedPtr { inner_type } => inner_type.as_ref().clone(),
+            Type::Slice { element_type } => element_type.as_ref().clone(),
             _ => pd.expected_type.clone(),
         };
 
@@ -2064,7 +2077,30 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st, '
             }
         }
 
-        let obj_ptr = obj_value.as_ref().to_ptr(node.location)?;
+        let obj_ptr = if obj_type.is_slice() {
+            let ptr = self.build_get_element_ptr(
+                node.location,
+                &pd.path,
+                &obj_type,
+                obj_value.as_ref().to_ptr(node.location)?,
+                &[
+                    self.ir_builder.context.i64_type().const_zero(),
+                    self.ir_builder.context.i64_type().const_zero(),
+                ],
+                "slice_data",
+            )?;
+            self.ir_builder
+                .builder
+                .build_load(
+                    self.ir_builder.context.ptr_type(AddressSpace::from(0)),
+                    ptr,
+                    "loaded.data",
+                )
+                .to_comp_res(node.location)?
+                .into_pointer_value()
+        } else {
+            obj_value.as_ref().to_ptr(node.location)?
+        };
 
         let indexed_ptr = self.build_get_element_ptr(
             node.location,
@@ -2258,42 +2294,142 @@ impl<'irb, 'ctx, 'st> ExpressionVisitor for IRTranslationPass<'irb, 'ctx, 'st, '
             .resolve_type_alias(&pd.path, pd.expected_type.clone())
             .to_comp_res(node.location)?;
 
-        if let Type::Struct(struct_type) = &expected_type {
-            let llvm_type = self.translate_type(&node.location, &pd.path, &expected_type)?;
+        match &expected_type {
+            Type::Struct(struct_type) => {
+                let llvm_type = self.translate_type(&node.location, &pd.path, &expected_type)?;
 
-            if let AnyTypeEnum::StructType(st) = llvm_type {
-                let mut i = 0;
-                let mut dst_struct = st.const_zero();
+                if let AnyTypeEnum::StructType(st) = llvm_type {
+                    let mut i = 0;
+                    let mut dst_struct = st.const_zero();
+                    for arg in &node.arguments {
+                        dst_struct = self
+                            .ir_builder
+                            .builder
+                            .build_insert_value(
+                                dst_struct,
+                                self.visit_expression(
+                                    arg.as_ref(),
+                                    &ExpressionPayload {
+                                        path: pd.path.clone(),
+                                        function: pd.function,
+                                        expected_type: struct_type.fields[i].clone(),
+                                        value_type: ValueType::RValue,
+                                    },
+                                )?
+                                .as_basic_value_enum(),
+                                i as u32,
+                                "struct.constr",
+                            )
+                            .to_comp_res(node.location)?
+                            .into_struct_value();
+                        i += 1;
+                    }
+
+                    Ok(Box::new(dst_struct))
+                } else {
+                    compiler_err!(node.location, "invalid constructor type")
+                }
+            }
+            Type::StaticArray {
+                element_type,
+                count,
+            } => {
+                let llvm_type = self.translate_type(&node.location, &pd.path, &expected_type)?;
+                let mut array = llvm_type
+                    .to_basic_type()
+                    .to_comp_res_with_desc(node.location, "failed to create static array")?
+                    .const_zero();
+                let mut index = 0;
                 for arg in &node.arguments {
-                    dst_struct = self
+                    let arg_expr = self.visit_expression(
+                        arg.as_ref(),
+                        &ExpressionPayload {
+                            path: pd.path.clone(),
+                            function: pd.function,
+                            expected_type: element_type.as_ref().clone(),
+                            value_type: ValueType::RValue,
+                        },
+                    )?;
+                    array = self
                         .ir_builder
                         .builder
                         .build_insert_value(
-                            dst_struct,
-                            self.visit_expression(
-                                arg.as_ref(),
-                                &ExpressionPayload {
-                                    path: pd.path.clone(),
-                                    function: pd.function,
-                                    expected_type: struct_type.fields[i].clone(),
-                                    value_type: ValueType::RValue,
-                                },
-                            )?
-                            .as_basic_value_enum(),
-                            i as u32,
-                            "struct.constr",
+                            array.to_array(node.location)?,
+                            arg_expr.as_basic_value_enum(),
+                            index,
+                            "array.insert",
                         )
                         .to_comp_res(node.location)?
-                        .into_struct_value();
-                    i += 1;
+                        .as_basic_value_enum();
+                    index += 1;
                 }
-
-                Ok(Box::new(dst_struct))
-            } else {
-                compiler_err!(node.location, "invalid constructor type")
+                Ok(Box::new(array))
             }
-        } else {
-            self.evaluate_compile_time_value(pd.path.clone(), expected_type, &node.into())
+            Type::Slice { element_type } => {
+                let llvm_type = self.translate_type(&node.location, &pd.path, &expected_type)?;
+                let mut struct_value: StructValue<'ctx> =
+                    if let AnyTypeEnum::StructType(st) = llvm_type {
+                        Ok(st.const_zero())
+                    } else {
+                        compiler_err!(node.location, "invalid constructor type")
+                    }?;
+
+                compiler_expect!(
+                    node.arguments.len() == 2,
+                    node.location,
+                    "expecting 2 arguments"
+                );
+
+                let expr_data = self.visit_expression(
+                    &node.arguments[0],
+                    &ExpressionPayload {
+                        path: pd.path.clone(),
+                        function: pd.function,
+                        expected_type: Type::TypedPtr {
+                            inner_type: element_type.clone(),
+                        },
+                        value_type: ValueType::RValue,
+                    },
+                )?;
+                struct_value = self
+                    .ir_builder
+                    .builder
+                    .build_insert_value(
+                        struct_value,
+                        expr_data.as_basic_value_enum(),
+                        0,
+                        "slice.data",
+                    )
+                    .to_comp_res(node.location)?
+                    .into_struct_value();
+
+                let expr_size = self.visit_expression(
+                    &node.arguments[1],
+                    &ExpressionPayload {
+                        path: pd.path.clone(),
+                        function: pd.function,
+                        expected_type: Type::Integer {
+                            is_signed: false,
+                            size: DataSize::Bits64,
+                        },
+                        value_type: ValueType::RValue,
+                    },
+                )?;
+                struct_value = self
+                    .ir_builder
+                    .builder
+                    .build_insert_value(
+                        struct_value,
+                        expr_size.as_basic_value_enum(),
+                        1,
+                        "slice.size",
+                    )
+                    .to_comp_res(node.location)?
+                    .into_struct_value();
+
+                Ok(Box::new(struct_value))
+            }
+            _ => self.evaluate_compile_time_value(pd.path.clone(), expected_type, &node.into()),
         }
     }
 }

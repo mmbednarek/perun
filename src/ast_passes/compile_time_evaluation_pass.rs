@@ -7,7 +7,7 @@ use crate::symbols::SymbolPath;
 use crate::typing::{DataSize, Type};
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
-use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue, StructValue};
 
 pub struct CompileTimeEvaluationPass<'irb, 'ctx, 'st> {
     build_context: &'irb IRBuildContext<'ctx, 'st>,

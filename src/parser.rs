@@ -438,6 +438,10 @@ where
                     element_type: Box::new(base_type),
                     count: count as u32,
                 })
+            } else if count_tkn.token_type == TokenType::Operator(OperatorType::RightSquare) {
+                Ok(Type::Slice {
+                    element_type: Box::new(base_type),
+                })
             } else {
                 compiler_err!(count_tkn.location, "missing count of array");
             }

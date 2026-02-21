@@ -76,6 +76,7 @@ pub enum Type {
     Integer { is_signed: bool, size: DataSize },
     FloatingPoint { size: DataSize },
     StaticArray { element_type: Box<Type>, count: u32 },
+    Slice { element_type: Box<Type> },
     Bool,
     Struct(StructTypeBox),
     Alias(Identifier),
@@ -234,6 +235,12 @@ impl Type {
                     .array_type(*count)
                     .into(),
             ),
+            Type::Slice { .. } => {
+                let mut basic_types: Vec<BasicTypeEnum> = Vec::new();
+                basic_types.push(ctx.ptr_type(inkwell::AddressSpace::from(0)).into());
+                basic_types.push(ctx.i64_type().into());
+                Some(ctx.struct_type(&basic_types, false).into())
+            }
             Type::Bool => Some(BasicTypeEnum::IntType(ctx.bool_type())),
             Type::Struct(struct_type) => Some(BasicTypeEnum::StructType(struct_to_llvm_type(
                 ctx,
@@ -263,6 +270,13 @@ impl Type {
         match self {
             Type::RawPtr => true,
             Type::TypedPtr { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_slice(&self) -> bool {
+        match self {
+            Type::Slice { .. } => true,
             _ => false,
         }
     }
@@ -342,6 +356,10 @@ impl Display for Type {
             } => {
                 element_type.as_ref().fmt(f)?;
                 write!(f, "[{}]", *count)
+            }
+            Type::Slice { element_type } => {
+                element_type.as_ref().fmt(f)?;
+                write!(f, "[]")
             }
             Type::Bool => write!(f, "bool"),
             Type::Struct(args) => {

@@ -1,7 +1,7 @@
 use crate::error::{CompilerResult, CompilerResultErrorMapper};
-use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable};
+use crate::symbols::{SymbolInfo, SymbolPath, SymbolTable, SymbolType};
 use crate::token::{Location, OperatorType};
-use crate::typing::{Identifier, Type, ValueType};
+use crate::typing::{DataSize, Identifier, Type, ValueType};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MathBinaryOperation {
@@ -940,6 +940,16 @@ pub struct GetFieldNode {
     pub field_name: String,
 }
 
+static SYMBOL_INFO_SLICE_SIZE: SymbolInfo = SymbolInfo {
+    name: String::new(),
+    sym_type: SymbolType::StructField(1),
+    data_type: Type::Integer {
+        is_signed: false,
+        size: DataSize::Bits64,
+    },
+    location: Location { line: 0, column: 0 },
+};
+
 impl GetFieldNode {
     pub fn get_symbol<'st>(
         &self,
@@ -959,6 +969,11 @@ impl GetFieldNode {
                 .find_symbol(&sym_path, &self.field_name)
                 .to_comp_res(self.location)?;
             Ok(symbol)
+        } else if let Type::Slice { element_type } = &obj_type {
+            if self.field_name == "count" {
+                return Ok(&SYMBOL_INFO_SLICE_SIZE);
+            }
+            compiler_err!(self.location, "invalid object type");
         } else {
             compiler_err!(self.location, "invalid object type");
         }

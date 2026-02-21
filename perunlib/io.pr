@@ -1,0 +1,7 @@
+module io;
+
+import posix;
+
+pub fn print(message: StringRef) {
+    posix::write(posix::STDOUT_FD, message.data, message.size);
+}

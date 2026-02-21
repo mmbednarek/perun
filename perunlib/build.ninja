@@ -32,8 +32,11 @@ build ${obj_out}/setup.o: perun setup.pr | ${mod_out} ${obj_out}/posix.o
 build ${obj_out}/util.o: perun util.pr | ${mod_out} ${obj_out}/root.o
     mod = ${mod_out}/util.json
 
+build ${obj_out}/io.o: perun io.pr | ${mod_out} ${obj_out}/root.o
+    mod = ${mod_out}/io.json
+
 build ${obj_out}/start.o: asm platform/${platform}/asm/${arch}/start.s
 build ${obj_out}/syscall.o: asm platform/${platform}/asm/${arch}/syscall.s
 build ${obj_out}/util-asm.o: asm platform/${platform}/asm/${arch}/util.s
 
-build ${lib_out}/perunlib.a: link_static ${obj_out}/root.o ${obj_out}/setup.o ${obj_out}/start.o ${obj_out}/syscall.o ${obj_out}/util-asm.o ${obj_out}/util.o
+build ${lib_out}/perunlib.a: link_static ${obj_out}/root.o ${obj_out}/setup.o ${obj_out}/start.o ${obj_out}/syscall.o ${obj_out}/util-asm.o ${obj_out}/util.o ${obj_out}/io.o

@@ -1,15 +1,26 @@
 module perunlib;
 
 import posix;
+import util;
 
 extern fn main(ref info: InitInfo) : ExitStatus;
 
 // This is called by _start
-pub fn init_library!"perun_init_library"(argc: i32, argv: rawptr)
+pub fn init_library!"perun_init_library"(argc: i32, argv: *rawptr)
 {
     var info: InitInfo;
-    info.arg_count = argc;
-    info.args = argv;
+
+    var invocation_ptr: rawptr = argv[0];
+    info.invocation = {invocation_ptr, util::count_chars(invocation_ptr)};
+
+    var args_array: StringRef[16] = {};
+    var arg_index: i32 = 1;
+    while arg_index < argc {
+        var arg_ptr: rawptr = argv[arg_index];
+        args_array[arg_index - 1] = {arg_ptr, util::count_chars(arg_ptr)};
+        arg_index += 1;
+    }
+    info.args = {&args_array, argc - 1};
 
     var exit_status: i32 = main(info);
     posix::exit(exit_status);

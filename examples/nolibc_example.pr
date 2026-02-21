@@ -1,14 +1,17 @@
-import posix;
+import io;
 import util;
 
 fn main(ref init: InitInfo) : ExitStatus {
-    posix::write(posix::STDOUT_FD, "Passed Arguments\n", 6);
+    io::print("Passed Arguments\n");
+
     var i = 0;
-    while i < init.arg_count {
-        var line: *i8 = *util::offset_ptr(init.args, i * 8);
-        posix::write(posix::STDOUT_FD, line, util::count_chars(line));
-        posix::write(posix::STDOUT_FD, "\n", 6);
+    var args = init.args;
+    while i < args.count {
+        var line: StringRef = args[i];
+        io::print(line);
+        io::print("\n");
         i += 1;
     }
+
     return ExitStatus::Success;
 }
