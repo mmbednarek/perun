@@ -5,3 +5,28 @@ import posix;
 pub fn print(message: StringRef) {
     posix::write(posix::STDOUT_FD, message.data, message.size);
 }
+
+pub enum AccessFlag {
+  Write,
+  Read,
+}
+
+pub struct File {
+  fd: i32
+}
+
+pub fn File.init(ref self, path: StringRef) {
+  self.fd = posix::open(path.data, 101);
+}
+
+pub fn File.read(ref self, data: u8[]) : mem_size {
+  return posix::read(self.fd, data.data, data.count);
+}
+
+pub fn File.write(ref self, data: u8[]) : mem_size {
+  return posix::write(self.fd, data.data, data.count);
+}
+
+pub fn File.close(ref self) {
+  posix::close(self.fd);
+}

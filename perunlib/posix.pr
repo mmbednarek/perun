@@ -4,5 +4,15 @@ pub const STDIN_FD = 0;
 pub const STDOUT_FD = 1;
 pub const STDERR_FD = 2;
 
-pub fn write!"posix_write"(file_desc: i32, buffer: rawptr, size: mem_size);
+pub const O_RDONLY = 00;
+pub const O_WRONLY = 01;
+pub const O_RDWR = 11;
+pub const O_CREAT = 0100;
+pub const O_TRUNC = 01000;
+pub const O_APPEND = 02000;
+
+pub fn read!"posix_read"(file_desc: i32, buffer: rawptr, size: mem_size) : mem_size;
+pub fn write!"posix_write"(file_desc: i32, buffer: rawptr, size: mem_size) : mem_size;
+pub fn open!"posix_open"(path: rawptr, flags: i32) : i32;
+pub fn close!"posix_close"(flags: i32): i32;
 pub fn exit!"posix_exit"(status: i32);

@@ -940,6 +940,13 @@ pub struct GetFieldNode {
     pub field_name: String,
 }
 
+static SYMBOL_INFO_SLICE_DATA: SymbolInfo = SymbolInfo {
+    name: String::new(),
+    sym_type: SymbolType::StructField(0),
+    data_type: Type::RawPtr,
+    location: Location { line: 0, column: 0 },
+};
+
 static SYMBOL_INFO_SLICE_SIZE: SymbolInfo = SymbolInfo {
     name: String::new(),
     sym_type: SymbolType::StructField(1),
@@ -970,7 +977,9 @@ impl GetFieldNode {
                 .to_comp_res(self.location)?;
             Ok(symbol)
         } else if let Type::Slice { element_type } = &obj_type {
-            if self.field_name == "count" {
+            if self.field_name == "data" {
+                return Ok(&SYMBOL_INFO_SLICE_DATA);
+            } else if self.field_name == "count" {
                 return Ok(&SYMBOL_INFO_SLICE_SIZE);
             }
             compiler_err!(self.location, "invalid object type");

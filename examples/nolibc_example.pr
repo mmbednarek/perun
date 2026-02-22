@@ -1,6 +1,10 @@
 import io;
 import util;
 
+fn string_to_slice(str: StringRef) : u8[] {
+  return {str.data, str.size};
+}
+
 fn main(ref init: InitInfo) : ExitStatus {
     io::print("Passed Arguments\n");
 
@@ -12,6 +16,13 @@ fn main(ref init: InitInfo) : ExitStatus {
         io::print("\n");
         i += 1;
     }
+
+    var f: io::File;
+    f.init("hello.txt");
+
+    var msg: StringRef = "hello world\n";
+    f.write(string_to_slice(msg));
+    f.close();
 
     return ExitStatus::Success;
 }
